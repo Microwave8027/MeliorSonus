@@ -1,0 +1,8 @@
+syntax = "proto3";
+
+package com.meliorsonus.app;
+
+message UserSettings {
+    string username = 1;
+    string customization_theme = 2;
+}
