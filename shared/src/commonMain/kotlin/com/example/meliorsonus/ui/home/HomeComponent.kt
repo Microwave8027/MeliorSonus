@@ -1,6 +1,7 @@
 package com.example.meliorsonus.ui.home
 
 import com.arkivanov.decompose.ComponentContext
+import com.arkivanov.decompose.childContext
 import com.arkivanov.decompose.value.MutableValue
 import com.arkivanov.decompose.value.Value
 import com.arkivanov.decompose.value.update
@@ -21,6 +22,7 @@ import org.koin.core.component.inject
 interface HomeComponent {
 
     val state: Value<HomeState>
+    val verovioManagerComponent: VerovioManagerComponent
 
     fun onTabSelected(tab: HomeTab)
     fun onLibrarySearchQueryChanged(query: String)
@@ -32,7 +34,10 @@ interface HomeComponent {
     fun onSearchPopupSubmit()
     fun onSearchResultSelected(result: SheetSearchResult)
     fun onClearSearchSelection()
-    fun onProceedWithSelectedSheet()
+    fun onProceedToZoomChecker()
+    fun onZoomLevelChanged(zoom: Float)
+    fun onBackFromZoomChecker()
+    fun onConfirmZoomAndProceed()
     fun onDeleteSheet(sheet: SheetSearchResult)
 
     enum class HomeTab { HOME, SKILLS, LIBRARY, PROFILE }
@@ -54,6 +59,10 @@ interface HomeComponent {
         val isFetchingPdf: Boolean = false,
         val pdfFetchError: String? = null,
 
+        val showZoomChecker: Boolean = false,
+        val zoomLevel: Float = 1.0f,
+        val isSaving: Boolean = false,
+
         val errorMessage: String? = null
     )
 }
@@ -62,6 +71,8 @@ class DefaultHomeComponent(
     componentContext: ComponentContext,
     private val onOpenSheetViewer: (SheetSearchResult) -> Unit
 ) : HomeComponent, KoinComponent, ComponentContext by componentContext {
+
+    override val verovioManagerComponent: VerovioManagerComponent = DefaultVerovioManagerComponent(childContext("VerovioManager"))
 
     private val saveSheetUseCase: SaveSheetUseCase by inject()
     private val savedSheetRepository: SavedSheetRepository by inject()
@@ -148,7 +159,9 @@ class DefaultHomeComponent(
                 selectedSearchResult = null,
                 pdfPath = null,
                 searchPopupError = null,
-                pdfFetchError = null
+                pdfFetchError = null,
+                showZoomChecker = false,
+                zoomLevel = 1.0f
             )
         }
     }
@@ -164,6 +177,7 @@ class DefaultHomeComponent(
 
     override fun onCloseAddSheetPopup() {
         cleanupPdf()
+        verovioManagerComponent.cleanup()
         _state.update { it.copy(showAddSheetPopup = false) }
     }
 
@@ -208,23 +222,57 @@ class DefaultHomeComponent(
 
     override fun onClearSearchSelection() {
         cleanupPdf()
-        _state.update { it.copy(selectedSearchResult = null, pdfFetchError = null) }
+        verovioManagerComponent.cleanup()
+        _state.update { it.copy(selectedSearchResult = null, pdfFetchError = null, showZoomChecker = false) }
     }
 
-    override fun onProceedWithSelectedSheet() {
-        val result = _state.value.selectedSearchResult ?: return
-        scope.launch {
-            val savedPath = try {
-                saveSheetUseCase(result)
-            } catch (e: Exception) {
-                _state.update { it.copy(searchPopupError = "Failed to save: ${e.message}") }
-                return@launch
+    override fun onProceedToZoomChecker() {
+        cleanupPdf()
+        state.value.selectedSearchResult?.mxl?.let { verovioManagerComponent.loadMxl(it) }
+        _state.update { it.copy(showZoomChecker = true) }
+    }
+
+    override fun onZoomLevelChanged(zoom: Float) {
+        _state.update { it.copy(zoomLevel = zoom) }
+    }
+
+
+    override fun onBackFromZoomChecker() {
+        verovioManagerComponent.cleanup()
+        _state.update { it.copy(showZoomChecker = false) }
+        val result = _state.value.selectedSearchResult
+        if (result != null && _state.value.pdfPath == null) {
+            scope.launch {
+                _state.update { it.copy(isFetchingPdf = true, pdfFetchError = null) }
+                try {
+                    val path = withTimeout(5000L) { sheetSearchRepository.fetchPdf(result.pdf) }
+                    _state.update { it.copy(pdfPath = path) }
+                } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+                    _state.update { it.copy(pdfFetchError = "PDF load timed out. Please try again.") }
+                } catch (e: Exception) {
+                    _state.update { it.copy(pdfFetchError = "Failed to load PDF: ${e.message ?: "Unknown error"}") }
+                } finally {
+                    _state.update { it.copy(isFetchingPdf = false) }
+                }
             }
-            cleanupPdf()
-            val sheet = result.copy(mxl = savedPath)
-            loadSavedSheets()
-            _state.update { it.copy(showAddSheetPopup = false) }
-            onOpenSheetViewer(sheet)
+        }
+    }
+
+    override fun onConfirmZoomAndProceed() {
+        val result = _state.value.selectedSearchResult ?: return
+        _state.update { it.copy(isSaving = true, searchPopupError = null) }
+        scope.launch {
+            try {
+                val savedMxl = saveSheetUseCase(result, _state.value.zoomLevel)
+                cleanupPdf()
+                verovioManagerComponent.cleanup()
+                val sheet = result.copy(mxl = savedMxl)
+                loadSavedSheets()
+                _state.update { it.copy(showAddSheetPopup = false, showZoomChecker = false, isSaving = false) }
+                onOpenSheetViewer(sheet)
+            } catch (e: Exception) {
+                _state.update { it.copy(isSaving = false, searchPopupError = "Failed to save: ${e.message ?: "Unknown error"}") }
+            }
         }
     }
 

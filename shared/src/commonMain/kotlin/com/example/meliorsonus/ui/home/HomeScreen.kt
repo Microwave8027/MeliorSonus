@@ -211,10 +211,17 @@ fun HomeScreen(
                             pdfPath = state.pdfPath,
                             isFetchingPdf = state.isFetchingPdf,
                             pdfFetchError = state.pdfFetchError,
+                            showZoomChecker = state.showZoomChecker,
+                            zoomLevel = state.zoomLevel,
+                            isSaving = state.isSaving,
+                            onZoomLevelChanged = component::onZoomLevelChanged,
+                            onBackFromZoomChecker = component::onBackFromZoomChecker,
+                            onConfirmZoomAndProceed = component::onConfirmZoomAndProceed,
                             onResultClick = component::onSearchResultSelected,
                             onClearSelection = component::onClearSearchSelection,
-                            onProceed = component::onProceedWithSelectedSheet,
-                            onClose = component::onCloseAddSheetPopup
+                            onProceed = component::onProceedToZoomChecker,
+                            onClose = component::onCloseAddSheetPopup,
+                            verovioComponent = component.verovioManagerComponent
                         )
                     }
                 }
@@ -241,10 +248,17 @@ fun HomeScreen(
                             pdfPath = state.pdfPath,
                             isFetchingPdf = state.isFetchingPdf,
                             pdfFetchError = state.pdfFetchError,
+                            showZoomChecker = state.showZoomChecker,
+                            zoomLevel = state.zoomLevel,
+                            isSaving = state.isSaving,
+                            onZoomLevelChanged = component::onZoomLevelChanged,
+                            onBackFromZoomChecker = component::onBackFromZoomChecker,
+                            onConfirmZoomAndProceed = component::onConfirmZoomAndProceed,
                             onResultClick = component::onSearchResultSelected,
                             onClearSelection = component::onClearSearchSelection,
-                            onProceed = component::onProceedWithSelectedSheet,
-                            onClose = component::onCloseAddSheetPopup
+                            onProceed = component::onProceedToZoomChecker,
+                            onClose = component::onCloseAddSheetPopup,
+                            verovioComponent = component.verovioManagerComponent
                         )
                     }
                 }

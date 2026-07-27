@@ -9,6 +9,7 @@ plugins {
     alias(libs.plugins.kotlinxSerialization)
     alias(libs.plugins.wire)
     alias(libs.plugins.sqldelight)
+    kotlin("native.cocoapods")
 }
 
 kotlin {
@@ -16,10 +17,28 @@ kotlin {
         iosArm64(),
         iosSimulatorArm64()
     ).forEach { iosTarget ->
-        iosTarget.binaries.framework {
+        iosTarget.compilations.getByName("main") {
+            cinterops.create("verovio_interop") {
+                defFile("src/nativeInterop/cinterop/verovio_interop.def")
+                compilerOpts("-Isrc/iosMain/objc/data_sources")
+                compilerOpts("-I${project.rootDir}/verovio-native/src/main/cpp/data_sources")
+                includeDirs("src/iosMain/objc/data_sources")
+            }
+        }
+    }
+
+    cocoapods {
+        summary = "MeliorSonus Shared Library"
+        homepage = "https://github.com/example/meliorsonus"
+        version = "1.0"
+        ios.deploymentTarget = "14.1"
+        framework {
             baseName = "Shared"
             isStatic = true
         }
+
+        // This ensures the .mm and .cpp files are compiled and linked by Xcode
+        extraSpecAttributes["source_files"] = "'src/iosMain/objc/data_sources/**/*.{h,m,mm}', '../verovio-native/src/main/cpp/data_sources/**/*.{hpp,cpp}'"
     }
     
     jvm()
@@ -54,6 +73,9 @@ kotlin {
             implementation(libs.compose.uiToolingPreview)
             implementation(libs.ktor.client.cio)
             implementation(libs.sqldelight.android.driver)
+            implementation(libs.androidsvg)
+            implementation(libs.koin.android)
+            implementation(project(":verovio-native"))
         }
 
         val androidHostTest by getting {
@@ -88,6 +110,7 @@ kotlin {
             implementation(libs.ktor.client.core)
             implementation(libs.ktor.client.content.negotiation)
             implementation(libs.ktor.serialization.kotlinx.json)
+            implementation(libs.kotlinx.serialization.json.okio)
             
             // Wire Proto, Okio & DataStore
             implementation(libs.wire.runtime)
@@ -97,6 +120,11 @@ kotlin {
             // SQLDelight
             implementation(libs.sqldelight.runtime)
             implementation(libs.sqldelight.coroutines.extensions)
+
+            //Coil for SVG rendering
+            implementation(libs.coil.compose)
+            implementation(libs.coil.network.ktor)
+            implementation(libs.coil.svg)
         }
         commonTest.dependencies {
             implementation(libs.kotlin.test)

@@ -1,0 +1,6 @@
+[submodule "iosApp/verovio-native/src/main/cpp/verovio"]
+	path = iosApp/verovio-native/src/main/cpp/verovio
+	url = https://github.com/rism-digital/verovio.git
+[submodule "verovio-native/src/main/cpp/verovio"]
+	path = verovio-native/src/main/cpp/verovio
+	url = https://github.com/rism-digital/verovio.git
