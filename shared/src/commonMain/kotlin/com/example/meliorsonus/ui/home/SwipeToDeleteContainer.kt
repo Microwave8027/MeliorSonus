@@ -19,6 +19,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
+import com.example.meliorsonus.theme.Miscellaneous.GlobalMaterialTheme
 import kotlin.math.roundToInt
 
 @Composable
@@ -46,14 +47,14 @@ fun SwipeToDeleteContainer(
                     .fillMaxHeight()
                     .padding(vertical = 2.dp) // align visually with card outline/margins
                     .clip(RoundedCornerShape(8.dp))
-                    .background(Color.Red)
+                    .background(GlobalMaterialTheme.colorScheme.primary)
                     .clickable { onDelete() },
                 contentAlignment = Alignment.Center
             ) {
                 Icon(
                     imageVector = Icons.Default.Delete,
                     contentDescription = "Delete",
-                    tint = Color.White
+                    tint = GlobalMaterialTheme.colorScheme.onPrimary
                 )
             }
 

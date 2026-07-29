@@ -18,12 +18,7 @@ kotlin {
         iosSimulatorArm64()
     ).forEach { iosTarget ->
         iosTarget.compilations.getByName("main") {
-            cinterops.create("verovio_interop") {
-                defFile("src/nativeInterop/cinterop/verovio_interop.def")
-                compilerOpts("-Isrc/iosMain/objc/data_sources")
-                compilerOpts("-I${project.rootDir}/verovio-native/src/main/cpp/data_sources")
-                includeDirs("src/iosMain/objc/data_sources")
-            }
+            // verovio_interop removed
         }
     }
 
@@ -38,7 +33,7 @@ kotlin {
         }
 
         // This ensures the .mm and .cpp files are compiled and linked by Xcode
-        extraSpecAttributes["source_files"] = "'src/iosMain/objc/data_sources/**/*.{h,m,mm}', '../verovio-native/src/main/cpp/data_sources/**/*.{hpp,cpp}'"
+        extraSpecAttributes["source_files"] = "'src/iosMain/objc/data_sources/**/*.{h,m,mm}'"
     }
     
     jvm()
@@ -75,7 +70,6 @@ kotlin {
             implementation(libs.sqldelight.android.driver)
             implementation(libs.androidsvg)
             implementation(libs.koin.android)
-            implementation(project(":verovio-native"))
         }
 
         val androidHostTest by getting {
@@ -92,6 +86,7 @@ kotlin {
             implementation(libs.compose.ui)
             implementation(libs.compose.components.resources)
             implementation(libs.compose.uiToolingPreview)
+            implementation(libs.compose.preview)
             implementation(libs.androidx.lifecycle.viewmodelCompose)
             implementation(libs.androidx.lifecycle.runtimeCompose)
             

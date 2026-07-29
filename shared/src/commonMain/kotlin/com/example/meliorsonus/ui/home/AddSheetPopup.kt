@@ -1,9 +1,6 @@
 package com.example.meliorsonus.ui.home
 
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -16,8 +13,6 @@ import androidx.compose.material.icons.filled.*
 import androidx.compose.material3.*
 import com.example.meliorsonus.theme.Miscellaneous.GlobalMaterialTheme
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.*
-import androidx.compose.runtime.collectAsState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.text.font.FontWeight
@@ -28,11 +23,6 @@ import androidx.compose.ui.unit.dp
 import com.example.meliorsonus.model.SheetSearchResult
 import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import coil3.compose.AsyncImage
-import kotlin.math.roundToInt
-import io.ktor.util.encodeBase64
-
 
 /**
  * Stateless add-sheet search popup. Renders one of two inner screens:
@@ -56,15 +46,9 @@ fun AddSheetPopupContent(
     pdfFetchError: String?,
     onResultClick: (SheetSearchResult) -> Unit,
     onClearSelection: () -> Unit,
-    onProceed: () -> Unit,
+    onConfirmAndSave: () -> Unit,
     onClose: () -> Unit,
-    showZoomChecker: Boolean,
-    zoomLevel: Float,
     isSaving: Boolean = false,
-    onZoomLevelChanged: (Float) -> Unit,
-    onBackFromZoomChecker: () -> Unit,
-    onConfirmZoomAndProceed: () -> Unit,
-    verovioComponent: VerovioManagerComponent,
     modifier: Modifier = Modifier
 ) {
     val showPreview = selectedResult != null
@@ -81,17 +65,11 @@ fun AddSheetPopupContent(
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
             if (showPreview) {
-                if (showZoomChecker) {
-                    IconButton(onClick = onBackFromZoomChecker) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to PDF preview")
-                    }
-                } else {
-                    IconButton(onClick = onClearSelection) {
-                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to results")
-                    }
+                IconButton(onClick = onClearSelection) {
+                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to results")
                 }
                 Text(
-                    text = if (showZoomChecker) "Configure Zoom" else "Preview Sheet",
+                    text = "Preview Sheet",
                     style = GlobalMaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                     modifier = Modifier.weight(1f)
@@ -121,23 +99,16 @@ fun AddSheetPopupContent(
                 results = results,
                 onResultClick = onResultClick
             )
-        } else if (!showZoomChecker) {
+        } else {
             PdfPreviewScreen(
                 result = selectedResult!!,
                 pdfPath = pdfPath,
                 isFetchingPdf = isFetchingPdf,
                 pdfFetchError = pdfFetchError,
                 isTablet = isTablet,
-                onProceed = onProceed
-            )
-        } else {
-            ZoomCheckerScreen(
-                zoomLevel = zoomLevel,
                 isSaving = isSaving,
                 searchError = searchError,
-                onZoomLevelChanged = onZoomLevelChanged,
-                onConfirmZoomAndProceed = onConfirmZoomAndProceed,
-                verovioComponent = verovioComponent
+                onConfirmAndSave = onConfirmAndSave
             )
         }
     }
@@ -229,7 +200,9 @@ private fun ColumnScope.PdfPreviewScreen(
     isFetchingPdf: Boolean,
     pdfFetchError: String?,
     isTablet: Boolean,
-    onProceed: () -> Unit
+    isSaving: Boolean,
+    searchError: String?,
+    onConfirmAndSave: () -> Unit
 ) {
     Column(modifier = Modifier.fillMaxWidth()) {
         Text(
@@ -243,20 +216,20 @@ private fun ColumnScope.PdfPreviewScreen(
             if (result.artistName.isNotEmpty() && result.artistName != "Unknown") Text(text = " · ${result.artistName}", style = GlobalMaterialTheme.typography.bodyMedium, color = GlobalMaterialTheme.colorScheme.onSurface)
             if (result.publisher.isNotEmpty() && result.publisher != "Unknown") Text(text = " · ${result.publisher}", style = GlobalMaterialTheme.typography.bodyMedium, color = GlobalMaterialTheme.colorScheme.onSurface)
         }
-            if (result.genres.isNotEmpty()) Text(
-                text = "Genres: ${result.genres}, ",
-                style = GlobalMaterialTheme.typography.bodySmall,
-                color = GlobalMaterialTheme.colorScheme.onSurfaceVariant
-            )
-            if (result.instruments.isNotEmpty()) Text(
-                text = "Instruments: ${
-                    result.instruments.joinToString(
-                        ", "
-                    )
-                }",
-                style = GlobalMaterialTheme.typography.bodySmall,
-                color = GlobalMaterialTheme.colorScheme.onSurfaceVariant
-            )
+        if (result.genres.isNotEmpty()) Text(
+            text = "Genres: ${result.genres}, ",
+            style = GlobalMaterialTheme.typography.bodySmall,
+            color = GlobalMaterialTheme.colorScheme.onSurfaceVariant
+        )
+        if (result.instruments.isNotEmpty()) Text(
+            text = "Instruments: ${
+                result.instruments.joinToString(
+                    ", "
+                )
+            }",
+            style = GlobalMaterialTheme.typography.bodySmall,
+            color = GlobalMaterialTheme.colorScheme.onSurfaceVariant
+        )
     }
 
     Spacer(Modifier.height(12.dp))
@@ -299,9 +272,36 @@ private fun ColumnScope.PdfPreviewScreen(
         }
     }
 
+    if (searchError != null) {
+        Spacer(Modifier.height(8.dp))
+        Text(
+            text = searchError,
+            color = GlobalMaterialTheme.colorScheme.error,
+            style = GlobalMaterialTheme.typography.bodySmall,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.fillMaxWidth()
+        )
+    }
+
     Spacer(Modifier.height(12.dp))
-    Button(onClick = onProceed, modifier = Modifier.fillMaxWidth(), enabled = !isFetchingPdf) {
-        Text("Proceed to Practice")
+    Button(
+        onClick = onConfirmAndSave,
+        modifier = Modifier.fillMaxWidth(),
+        enabled = !isFetchingPdf && !isSaving
+    ) {
+        if (isSaving) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size(18.dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.onPrimary
+                )
+                Spacer(Modifier.width(8.dp))
+                Text("Saving...")
+            }
+        } else {
+            Text("Proceed to Practice")
+        }
     }
 }
 
@@ -371,160 +371,3 @@ fun SearchResultCard(
     }
 }
 
-@Composable
-fun ColumnScope.ZoomCheckerScreen(
-    zoomLevel: Float,
-    isSaving: Boolean = false,
-    searchError: String? = null,
-    onZoomLevelChanged: (Float) -> Unit,
-    onConfirmZoomAndProceed: () -> Unit,
-    verovioComponent: VerovioManagerComponent
-) {
-    ZoomCheckerContent(
-        zoomLevel = zoomLevel,
-        isSaving = isSaving,
-        searchError = searchError,
-        onZoomLevelChanged = onZoomLevelChanged,
-        onConfirmZoomAndProceed = onConfirmZoomAndProceed,
-        verovioComponent = verovioComponent,
-        modifier = Modifier.weight(1f).fillMaxWidth()
-    )
-}
-
-@Composable
-fun ZoomCheckerContent(
-    zoomLevel: Float,
-    isSaving: Boolean = false,
-    searchError: String? = null,
-    onZoomLevelChanged: (Float) -> Unit,
-    onConfirmZoomAndProceed: () -> Unit,
-    verovioComponent: VerovioManagerComponent,
-    modifier: Modifier = Modifier
-) {
-    val verovioState by verovioComponent.state.collectAsState()
-
-    Column(modifier = modifier) {
-        Column(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxWidth()
-                .verticalScroll(rememberScrollState())
-        ) {
-            Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 8.dp)) {
-                Text(
-                    text = "Edit your zoom",
-                    style = GlobalMaterialTheme.typography.titleLarge,
-                    color = GlobalMaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = "Important: You cannot change your zoom after you proceed",
-                    style = GlobalMaterialTheme.typography.bodyMedium,
-                    color = GlobalMaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-
-            Spacer(Modifier.height(16.dp))
-
-            // Zoom Slider
-            var sliderValue by remember(zoomLevel) { mutableStateOf(zoomLevel) }
-
-            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
-                Text("Zoom: ${(sliderValue * 100).roundToInt()}%", modifier = Modifier.width(100.dp))
-                Slider(
-                    value = sliderValue,
-                    onValueChange = { sliderValue = it },
-                    onValueChangeFinished = { onZoomLevelChanged(sliderValue) },
-                    valueRange = 0.25f..2.0f,
-                    steps = 13, // 13 steps between 0.25 and 2.0 gives roughly 0.125 (12.5%) per step
-                    modifier = Modifier.weight(1f)
-                )
-            }
-
-            Spacer(Modifier.height(16.dp))
-
-            // SVG Preview
-            BoxWithConstraints(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .border(1.dp, GlobalMaterialTheme.colorScheme.outlineVariant, RoundedCornerShape(8.dp))
-                    .padding(8.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                val widthPx = constraints.maxWidth.toFloat()
-
-                when {
-                    verovioState.isLoading -> {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(vertical = 40.dp)) {
-                            CircularProgressIndicator()
-                            Spacer(Modifier.height(12.dp))
-                            Text("Loading XML...", style = GlobalMaterialTheme.typography.bodyMedium)
-                        }
-                    }
-                    verovioState.error != null -> {
-                        Text("Error: ${verovioState.error}", color = GlobalMaterialTheme.colorScheme.error, modifier = Modifier.padding(vertical = 40.dp))
-                    }
-                    else -> {
-                        val density = androidx.compose.ui.platform.LocalDensity.current
-                        val widthDp = with(density) { constraints.maxWidth.toDp() }.value.toInt()
-                        val heightDp = verovioComponent.fetchScreenHeight(widthDp)
-                        val targetHeightPx = with(density) { heightDp.dp.toPx() }
-
-                        val dataUri = remember(zoomLevel, verovioState.currentXmlData, widthPx, targetHeightPx) {
-                            val svgString = verovioComponent.renderSvg(zoomLevel, widthPx, targetHeightPx)
-                            val base64Svg = svgString.encodeToByteArray().encodeBase64()
-                            "data:image/svg+xml;base64,$base64Svg"
-                        }
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(heightDp.dp)
-                                .clip(RoundedCornerShape(4.dp))
-                                .background(Color.White),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            AsyncImage(
-                                model = dataUri,
-                                contentDescription = "MusicXML SVG Preview",
-                                modifier = Modifier.fillMaxSize()
-                            )
-                        }
-                    }
-                }
-            }
-        }
-
-        if (searchError != null) {
-            Spacer(Modifier.height(8.dp))
-            Text(
-                text = searchError,
-                color = GlobalMaterialTheme.colorScheme.error,
-                style = GlobalMaterialTheme.typography.bodySmall,
-                textAlign = TextAlign.Center,
-                modifier = Modifier.fillMaxWidth()
-            )
-        }
-
-        Spacer(Modifier.height(16.dp))
-
-        Button(
-            onClick = onConfirmZoomAndProceed,
-            modifier = Modifier.fillMaxWidth(),
-            enabled = verovioState.isLoaded && !isSaving
-        ) {
-            if (isSaving) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    CircularProgressIndicator(
-                        modifier = Modifier.size(18.dp),
-                        strokeWidth = 2.dp,
-                        color = MaterialTheme.colorScheme.onPrimary
-                    )
-                    Spacer(Modifier.width(8.dp))
-                    Text("Saving...")
-                }
-            } else {
-                Text("Proceed")
-            }
-        }
-    }
-}

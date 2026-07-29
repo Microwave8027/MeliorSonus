@@ -12,7 +12,6 @@ import com.example.meliorsonus.ui.home.DefaultHomeComponent
 import com.example.meliorsonus.ui.home.HomeComponent
 import com.example.meliorsonus.ui.sheetviewer.DefaultSheetViewerComponent
 import com.example.meliorsonus.ui.sheetviewer.SheetViewerComponent
-import com.example.meliorsonus.util.SizeOfScreen
 import kotlinx.serialization.Serializable
 import org.koin.core.component.KoinComponent
 import org.koin.core.component.inject
@@ -32,7 +31,6 @@ class DefaultRootComponent(
 
     private val navigation = StackNavigation<Config>()
 
-    private val sizeOfScreen: SizeOfScreen by inject()
 
     override val stack: Value<ChildStack<*, RootComponent.Child>> = childStack(
         source = navigation,
@@ -57,7 +55,6 @@ class DefaultRootComponent(
                     componentContext = context,
                     sheet = config.sheet,
                     onBack = { navigation.pop() },
-                    sizeOfScreen = sizeOfScreen
                 )
             )
         }

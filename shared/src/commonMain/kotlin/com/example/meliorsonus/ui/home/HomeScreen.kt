@@ -17,6 +17,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import com.arkivanov.decompose.extensions.compose.subscribeAsState
+import com.example.meliorsonus.model.SheetSearchResult
 import com.example.meliorsonus.theme.Miscellaneous.GlobalMaterialTheme
 import com.example.meliorsonus.ui.home.HomeComponent.HomeTab
 import kotlinx.coroutines.launch
@@ -123,7 +124,7 @@ fun HomeScreen(
                         },
                         bottomBar = {
                             NavigationBar(
-                                containerColor = GlobalMaterialTheme.colorScheme.onTertiary,
+                                containerColor = GlobalMaterialTheme.colorScheme.surface,
                                 tonalElevation = 8.dp
                             ) {
                                 NavigationBarItem(
@@ -188,7 +189,7 @@ fun HomeScreen(
                 Box(
                     modifier = Modifier
                         .fillMaxSize()
-                        .background(Color.Black.copy(alpha = 0.5f)),
+                        .background(GlobalMaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)),
                     contentAlignment = Alignment.Center
                 ) {
                     Card(
@@ -211,17 +212,11 @@ fun HomeScreen(
                             pdfPath = state.pdfPath,
                             isFetchingPdf = state.isFetchingPdf,
                             pdfFetchError = state.pdfFetchError,
-                            showZoomChecker = state.showZoomChecker,
-                            zoomLevel = state.zoomLevel,
                             isSaving = state.isSaving,
-                            onZoomLevelChanged = component::onZoomLevelChanged,
-                            onBackFromZoomChecker = component::onBackFromZoomChecker,
-                            onConfirmZoomAndProceed = component::onConfirmZoomAndProceed,
                             onResultClick = component::onSearchResultSelected,
                             onClearSelection = component::onClearSearchSelection,
-                            onProceed = component::onProceedToZoomChecker,
-                            onClose = component::onCloseAddSheetPopup,
-                            verovioComponent = component.verovioManagerComponent
+                            onConfirmAndSave = component::onConfirmAndSaveSheet,
+                            onClose = component::onCloseAddSheetPopup
                         )
                     }
                 }
@@ -248,17 +243,11 @@ fun HomeScreen(
                             pdfPath = state.pdfPath,
                             isFetchingPdf = state.isFetchingPdf,
                             pdfFetchError = state.pdfFetchError,
-                            showZoomChecker = state.showZoomChecker,
-                            zoomLevel = state.zoomLevel,
                             isSaving = state.isSaving,
-                            onZoomLevelChanged = component::onZoomLevelChanged,
-                            onBackFromZoomChecker = component::onBackFromZoomChecker,
-                            onConfirmZoomAndProceed = component::onConfirmZoomAndProceed,
                             onResultClick = component::onSearchResultSelected,
                             onClearSelection = component::onClearSearchSelection,
-                            onProceed = component::onProceedToZoomChecker,
-                            onClose = component::onCloseAddSheetPopup,
-                            verovioComponent = component.verovioManagerComponent
+                            onConfirmAndSave = component::onConfirmAndSaveSheet,
+                            onClose = component::onCloseAddSheetPopup
                         )
                     }
                 }
@@ -266,3 +255,65 @@ fun HomeScreen(
         }
     }
 }
+
+private val sampleSheetsForPreview = listOf(
+    SheetSearchResult(
+        mxl = "sample1.mxl",
+        pdf = "sample1.pdf",
+        title = "Moonlight Sonata",
+        artistName = "Ludwig van Beethoven",
+        composerName = "L. v. Beethoven",
+        publisher = "Classic Music",
+        songLengthBars = 64,
+        genres = "Classical"
+    ),
+    SheetSearchResult(
+        mxl = "sample2.mxl",
+        pdf = "sample2.pdf",
+        title = "Clair de Lune",
+        artistName = "Claude Debussy",
+        composerName = "Claude Debussy",
+        publisher = "Impressionist Press",
+        songLengthBars = 72,
+        genres = "Impressionism"
+    ),
+    SheetSearchResult(
+        mxl = "sample3.mxl",
+        pdf = "sample3.pdf",
+        title = "Für Elise",
+        artistName = "Ludwig van Beethoven",
+        composerName = "L. v. Beethoven",
+        publisher = "Classic Music",
+        songLengthBars = 48,
+        genres = "Classical"
+    )
+)
+
+@org.jetbrains.compose.ui.tooling.preview.Preview
+@Composable
+private fun HomeScreenLightPreview() {
+    GlobalMaterialTheme(darkTheme = false) {
+        Surface(modifier = Modifier.fillMaxSize()) {
+            HomeContent(
+                items = sampleSheetsForPreview,
+                onItemClick = {},
+                onDelete = {}
+            )
+        }
+    }
+}
+
+@org.jetbrains.compose.ui.tooling.preview.Preview
+@Composable
+private fun HomeScreenDarkPreview() {
+    GlobalMaterialTheme(darkTheme = true) {
+        Surface(modifier = Modifier.fillMaxSize()) {
+            HomeContent(
+                items = sampleSheetsForPreview,
+                onItemClick = {},
+                onDelete = {}
+            )
+        }
+    }
+}
+

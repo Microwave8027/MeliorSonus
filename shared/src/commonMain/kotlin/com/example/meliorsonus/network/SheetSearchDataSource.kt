@@ -33,14 +33,4 @@ class SheetSearchDataSource(private val client: HttpClient) {
             parameter("path", mxlPath)
         }.bodyAsChannel()
     }
-
-    // Fetches SVG content from /svg endpoint
-    suspend fun fetchSVG(mxlPath: String, height: Int, width: Int, zoom: Int = 100): String {
-        return client.get("$baseUrl/svg") {
-            parameter("path", mxlPath)
-            parameter("height", height)
-            parameter("width", width)
-            parameter("zoom", zoom)
-        }.bodyAsText()
-    }
 }

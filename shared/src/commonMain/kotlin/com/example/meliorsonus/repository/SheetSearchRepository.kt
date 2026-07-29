@@ -6,10 +6,11 @@ import com.example.meliorsonus.util.appFilesDir
 import com.example.meliorsonus.util.systemFileSystem
 import com.example.meliorsonus.util.tempDir
 import com.example.meliorsonus.util.unzipMusicXml
-import com.example.meliorsonus.util.trimMusicXmlTo10Measures
 import com.example.meliorsonus.util.ioDispatcher
 import io.ktor.utils.io.readAvailable
 import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.Json
+import okio.Path
 import okio.Path.Companion.toPath
 import okio.buffer
 import okio.use
@@ -18,10 +19,7 @@ interface SheetSearchRepository {
     suspend fun searchSheets(query: String): List<SheetSearchResult>
     suspend fun fetchPdf(pdfPath: String): String
     suspend fun deletePdf(tempPath: String)
-    suspend fun deleteMXL(tempPath: String)
-    suspend fun fetchMXL(mxlPath: String): Pair<String, String> // Path, XML Content
-
-    suspend fun fetchSVG(mxlPath: String, width: Int, height: Int, zoom: Int = 100, device: String = "tablet"): String
+    suspend fun fetchMXL(mxlPath: String): String
 }
 
 class SheetSearchRepositoryImpl(
@@ -57,7 +55,7 @@ class SheetSearchRepositoryImpl(
         }
     }
 
-    override suspend fun fetchMXL(mxlPath: String): Pair<String, String> = withContext(ioDispatcher) {
+    override suspend fun fetchMXL(mxlPath: String): String = withContext(ioDispatcher) {
         val normalizedMxlPath = mxlPath.replace("\\", "/")
         val response = dataSource.fetchMXL(normalizedMxlPath)
 
@@ -85,43 +83,13 @@ class SheetSearchRepositoryImpl(
             systemFileSystem.delete(tempMxlPath)
         } catch (_: Exception) {}
 
-        var trimmedXml = ""
         try {
             val rawXml = systemFileSystem.source(xmlPath).buffer().use { it.readUtf8() }
-            trimmedXml = trimMusicXmlTo10Measures(rawXml)
             systemFileSystem.sink(xmlPath).buffer().use { sink ->
-                sink.writeUtf8(trimmedXml)
+                sink.writeUtf8(rawXml)
             }
         } catch (_: Exception) {}
 
-        xmlPath.toString() to trimmedXml
-    }
-
-    override suspend fun deleteMXL(tempPath: String) {
-        withContext(ioDispatcher) {
-            try {
-                if (tempPath.isNotBlank()) {
-                    val path = tempPath.toPath()
-                    if (systemFileSystem.exists(path)) {
-                        systemFileSystem.delete(path)
-                    }
-                }
-            } catch (_: Exception) {
-                // Ignore deletion errors
-            }
-        }
-    }
-
-    override suspend fun fetchSVG(mxlPath: String, width: Int, height: Int, zoom: Int, device: String): String = withContext(ioDispatcher) {
-        val normalizedMxlPath = mxlPath.replace("\\", "/")
-        val response = dataSource.fetchSVG(normalizedMxlPath, height, width, zoom)
-        val fileName = normalizedMxlPath.substringAfterLast("/")
-        val filePath = appFilesDir.toPath() / "raw" / device / fileName
-
-        filePath.parent?.let { systemFileSystem.createDirectories(it) }
-        systemFileSystem.sink(filePath).buffer().use { sink ->
-            sink.writeUtf8(response)
-        }
-        normalizedMxlPath
+        xmlPath.toString()
     }
 }

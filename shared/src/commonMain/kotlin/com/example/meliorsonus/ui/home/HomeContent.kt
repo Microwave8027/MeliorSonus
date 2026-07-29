@@ -153,3 +153,54 @@ fun MusicSheetThumbnail(modifier: Modifier = Modifier) {
     )
 }
 
+private val sampleHomeItemsForPreview = listOf(
+    SheetSearchResult(
+        mxl = "sample1.mxl",
+        pdf = "sample1.pdf",
+        title = "Moonlight Sonata",
+        artistName = "Ludwig van Beethoven",
+        composerName = "L. v. Beethoven",
+        publisher = "Classic Music",
+        songLengthBars = 64,
+        genres = "Classical"
+    ),
+    SheetSearchResult(
+        mxl = "sample2.mxl",
+        pdf = "sample2.pdf",
+        title = "Clair de Lune",
+        artistName = "Claude Debussy",
+        composerName = "Claude Debussy",
+        publisher = "Impressionist Press",
+        songLengthBars = 72,
+        genres = "Impressionism"
+    )
+)
+
+@org.jetbrains.compose.ui.tooling.preview.Preview
+@Composable
+private fun HomeContentLightPreview() {
+    GlobalMaterialTheme(darkTheme = false) {
+        Surface(modifier = Modifier.fillMaxSize()) {
+            HomeContent(
+                items = sampleHomeItemsForPreview,
+                onItemClick = {},
+                onDelete = {}
+            )
+        }
+    }
+}
+
+@org.jetbrains.compose.ui.tooling.preview.Preview
+@Composable
+private fun HomeContentDarkPreview() {
+    GlobalMaterialTheme(darkTheme = true) {
+        Surface(modifier = Modifier.fillMaxSize()) {
+            HomeContent(
+                items = sampleHomeItemsForPreview,
+                onItemClick = {},
+                onDelete = {}
+            )
+        }
+    }
+}
+

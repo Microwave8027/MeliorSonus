@@ -4,44 +4,45 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
-import androidx.compose.ui.graphics.Color
 
+// Dark Mode: Background is Black (RichBlack), Text is White with slight yellow (WarmWhite)
 private val DarkColorScheme = darkColorScheme(
-    primary = GroovAmber,
-    onPrimary = GroovDeepBlack,
-    secondary = GroovCoral,
-    onSecondary = GroovDeepBlack,
-    tertiary = GroovLavender,
-    onTertiary = GroovDeepBlack,
-    background = GroovCharcoal,
-    onBackground = GroovCream,
-    surface = GroovCharcoal,
-    onSurface = GroovCream,
-    surfaceVariant = GroovSurface,
-    onSurfaceVariant = GroovMuted,
-    outline = GroovBorder,
-    outlineVariant = GroovMuted,
-    error = GroovError,
-    onError = Color.White
+    primary = WarmWhite,
+    onPrimary = RichBlack,
+    secondary = WarmWhite,
+    onSecondary = RichBlack,
+    tertiary = WarmWhite,
+    onTertiary = RichBlack,
+    background = RichBlack,
+    onBackground = WarmWhite,
+    surface = RichBlack,
+    onSurface = WarmWhite,
+    surfaceVariant = RichBlack,
+    onSurfaceVariant = WarmWhite,
+    outline = WarmWhite,
+    outlineVariant = WarmWhite,
+    error = WarmWhite,
+    onError = RichBlack
 )
 
+// Light Mode: Background is White with slight yellow (WarmWhite), Text is Black (RichBlack)
 private val LightColorScheme = lightColorScheme(
-    primary = GroovAmber,
-    onPrimary = GroovDeepBlack,
-    secondary = GroovCoral,
-    onSecondary = Color.White,
-    tertiary = GroovLavender,
-    onTertiary = Color.White,
-    background = GroovLightBackground,
-    onBackground = GroovLightOnBackground,
-    surface = GroovLightSurface,
-    onSurface = GroovLightOnBackground,
-    surfaceVariant = Color(0xFFF5F0E8),
-    onSurfaceVariant = Color(0xFF6E6E73),
-    outline = Color(0xFFD1C4A9),
-    outlineVariant = Color(0xFF9E9E9E),
-    error = GroovError,
-    onError = Color.White
+    primary = RichBlack,
+    onPrimary = WarmWhite,
+    secondary = RichBlack,
+    onSecondary = WarmWhite,
+    tertiary = RichBlack,
+    onTertiary = WarmWhite,
+    background = WarmWhite,
+    onBackground = RichBlack,
+    surface = WarmWhite,
+    onSurface = RichBlack,
+    surfaceVariant = WarmWhite,
+    onSurfaceVariant = RichBlack,
+    outline = RichBlack,
+    outlineVariant = RichBlack,
+    error = RichBlack,
+    onError = WarmWhite
 )
 
 @Composable
