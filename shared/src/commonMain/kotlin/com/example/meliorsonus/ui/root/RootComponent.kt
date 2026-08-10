@@ -8,13 +8,12 @@ import com.arkivanov.decompose.router.stack.pop
 import com.arkivanov.decompose.router.stack.push
 import com.arkivanov.decompose.value.Value
 import com.example.meliorsonus.model.SheetSearchResult
-import com.example.meliorsonus.ui.home.DefaultHomeComponent
-import com.example.meliorsonus.ui.home.HomeComponent
-import com.example.meliorsonus.ui.sheetviewer.DefaultSheetViewerComponent
-import com.example.meliorsonus.ui.sheetviewer.SheetViewerComponent
+import com.example.meliorsonus.ui.home.core.DefaultHomeComponent
+import com.example.meliorsonus.ui.home.core.HomeComponent
+import com.example.meliorsonus.ui.sheetviewer.core.DefaultSheetViewerComponent
+import com.example.meliorsonus.ui.sheetviewer.core.SheetViewerComponent
 import kotlinx.serialization.Serializable
 import org.koin.core.component.KoinComponent
-import org.koin.core.component.inject
 
 interface RootComponent {
     val stack: Value<ChildStack<*, Child>>
@@ -31,6 +30,7 @@ class DefaultRootComponent(
 
     private val navigation = StackNavigation<Config>()
 
+    private var homeComponent: HomeComponent? = null
 
     override val stack: Value<ChildStack<*, RootComponent.Child>> = childStack(
         source = navigation,
@@ -42,19 +42,24 @@ class DefaultRootComponent(
 
     private fun createChild(config: Config, context: ComponentContext): RootComponent.Child =
         when (config) {
-            is Config.Home -> RootComponent.Child.HomeChild(
-                DefaultHomeComponent(
+            is Config.Home -> {
+                val component = DefaultHomeComponent(
                     componentContext = context,
                     onOpenSheetViewer = { sheet ->
                         navigation.push(Config.SheetViewer(sheet))
                     }
                 )
-            )
+                this.homeComponent = component
+                RootComponent.Child.HomeChild(component)
+            }
             is Config.SheetViewer -> RootComponent.Child.SheetViewerChild(
                 DefaultSheetViewerComponent(
                     componentContext = context,
                     sheet = config.sheet,
-                    onBack = { navigation.pop() },
+                    onBack = {
+                        homeComponent?.onReturnToHome()
+                        navigation.pop()
+                    },
                 )
             )
         }

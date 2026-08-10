@@ -8,15 +8,13 @@ data class SheetSearchResult(
     val mxl: String,
     val pdf: String,
     val title: String,
-    @SerialName("artist_name") val artistName: String,
-    @SerialName("composer_name") val composerName: String,
-    val publisher: String,
-    @SerialName("song_length.bars") val songLengthBars: Int = 0,
-    val genres: String = "",
-    val instruments: List<String> = emptyList()
+    @SerialName("song_length.bars") val songLengthBars: Int,
+    val genres: String,
+    val instruments: List<String>,
+    val composer: String
 )
 
 @Serializable
 data class SheetSearchResponse(
-    val results: Map<String, SheetSearchResult>
+    @SerialName("results") val results: Map<String, SheetSearchResult>
 )

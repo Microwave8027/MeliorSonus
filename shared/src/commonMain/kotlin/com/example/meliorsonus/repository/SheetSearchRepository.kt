@@ -16,7 +16,7 @@ import okio.buffer
 import okio.use
 
 interface SheetSearchRepository {
-    suspend fun searchSheets(query: String): List<SheetSearchResult>
+    suspend fun searchSheets(query: String, pages: Int, instrument: String = ""): List<SheetSearchResult>
     suspend fun fetchPdf(pdfPath: String): String
     suspend fun deletePdf(tempPath: String)
     suspend fun fetchMXL(mxlPath: String): String
@@ -25,12 +25,12 @@ interface SheetSearchRepository {
 class SheetSearchRepositoryImpl(
     private val dataSource: SheetSearchDataSource
 ) : SheetSearchRepository {
-    override suspend fun searchSheets(query: String): List<SheetSearchResult> =
-        dataSource.searchSheets(query)
+    override suspend fun searchSheets(query: String, pages: Int, instrument: String): List<SheetSearchResult> =
+        dataSource.searchSheets(query, pages, instrument)
 
     override suspend fun fetchPdf(pdfPath: String): String = withContext(ioDispatcher) {
         val response = dataSource.fetchPdf(pdfPath)
-        val fileName = "temp_" + pdfPath.hashCode().coerceAtLeast(0) + ".pdf"
+        val fileName = pdfPath.replace("\\", "/").substringAfterLast("/")
         val path = tempDir.toPath() / fileName
         
         systemFileSystem.sink(path).buffer().use { sink ->

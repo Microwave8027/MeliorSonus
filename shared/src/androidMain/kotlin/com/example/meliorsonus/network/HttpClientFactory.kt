@@ -26,4 +26,4 @@ actual val createHttpClient: HttpClient = HttpClient(CIO) {
     }
 }
 
-actual val baseUrl: String = "http://127.0.0.1:8000"
+actual val baseUrl: String = "http://192.168.68.56:8000"

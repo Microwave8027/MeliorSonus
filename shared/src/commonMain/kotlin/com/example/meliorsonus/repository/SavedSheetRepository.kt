@@ -18,16 +18,16 @@ import kotlinx.serialization.decodeFromString
 interface SavedSheetRepository {
     suspend fun saveSheet(
         mxl: String,
+        pdf: String,
         title: String,
-        artistName: String,
-        composerName: String,
-        publisher: String,
+        composer: String,
         songLengthBars: Long,
         genres: String,
         instruments: String,
     )
     suspend fun getAllSavedSheets(): List<SavedSheet>
     suspend fun deleteSheet(mxl: String)
+    suspend fun checkExistance(mxl: String): Boolean
 }
 
 class SavedSheetRepositoryImpl(
@@ -37,10 +37,9 @@ class SavedSheetRepositoryImpl(
 
     override suspend fun saveSheet(
         mxl: String,
+        pdf: String,
         title: String,
-        artistName: String,
-        composerName: String,
-        publisher: String,
+        composer: String,
         songLengthBars: Long,
         genres: String,
         instruments: String,
@@ -48,10 +47,9 @@ class SavedSheetRepositoryImpl(
         withContext(ioDispatcher) {
             queries.insertSavedSheet(
                 mxl = mxl,
+                pdf_icon = pdf,
                 title = title,
-                artist_name = artistName,
-                composer_name = composerName,
-                publisher = publisher,
+                composer = composer,
                 song_length_bars = songLengthBars,
                 genres = genres,
                 instruments = instruments,
@@ -80,5 +78,9 @@ class SavedSheetRepositoryImpl(
             }
             queries.deleteSavedSheet(normalizedMxl)
         }
+    }
+
+    override suspend fun checkExistance(mxl: String): Boolean = withContext(ioDispatcher) {
+        queries.checkExists(mxl).executeAsOne()
     }
 }

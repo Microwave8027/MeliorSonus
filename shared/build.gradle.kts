@@ -1,5 +1,4 @@
-import org.jetbrains.kotlin.gradle.ExperimentalWasmDsl
-import org.jetbrains.kotlin.gradle.dsl.JvmTarget
+
 
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
@@ -11,6 +10,7 @@ plugins {
     alias(libs.plugins.sqldelight)
     kotlin("native.cocoapods")
 }
+
 
 kotlin {
     listOf(
@@ -36,12 +36,6 @@ kotlin {
         extraSpecAttributes["source_files"] = "'src/iosMain/objc/data_sources/**/*.{h,m,mm}'"
     }
     
-    jvm()
-    
-    js {
-        browser()
-    }
-    
 
     
     android {
@@ -49,9 +43,7 @@ kotlin {
        compileSdk = libs.versions.android.compileSdk.get().toInt()
        minSdk = libs.versions.android.minSdk.get().toInt()
     
-       compilerOptions {
-           jvmTarget = JvmTarget.JVM_11
-       }
+
        androidResources {
            enable = true
        }
@@ -70,6 +62,7 @@ kotlin {
             implementation(libs.sqldelight.android.driver)
             implementation(libs.androidsvg)
             implementation(libs.koin.android)
+            implementation("net.java.dev.jna:jna:5.14.0@aar")
         }
 
         val androidHostTest by getting {
@@ -125,23 +118,9 @@ kotlin {
             implementation(libs.kotlin.test)
             implementation(libs.kotlinx.coroutines.test)
         }
-        jsMain.dependencies {
-            implementation(libs.wrappers.browser)
-            implementation(libs.ktor.client.js)
-        }
         iosMain.dependencies {
             implementation(libs.ktor.client.cio)
             implementation(libs.sqldelight.native.driver)
-        }
-        val iosMain by getting {
-            resources.srcDirs("src/commonMain/webview")
-        }
-        jvmMain.dependencies {
-            implementation(libs.ktor.client.cio)
-            implementation(libs.sqldelight.sqlite.driver)
-        }
-        jvmTest.dependencies {
-            implementation(libs.sqldelight.sqlite.driver)
         }
     }
 }

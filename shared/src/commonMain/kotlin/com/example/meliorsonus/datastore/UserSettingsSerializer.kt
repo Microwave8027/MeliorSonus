@@ -8,7 +8,8 @@ import com.meliorsonus.app.UserSettings
 object UserSettingsSerializer : OkioSerializer<UserSettings> {
     override val defaultValue: UserSettings = UserSettings(
         username = "",
-        customization_theme = "light"
+        customization_theme = "light",
+        language = "english"
     )
 
     override suspend fun readFrom(source: BufferedSource): UserSettings {

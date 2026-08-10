@@ -1,5 +1,10 @@
 package com.example.meliorsonus.util
 
+import android.graphics.Bitmap
+import android.graphics.Canvas
+import android.graphics.Color
+import android.graphics.pdf.PdfRenderer
+import android.os.ParcelFileDescriptor
 import android.content.Context
 import kotlinx.coroutines.CoroutineDispatcher
 import kotlinx.coroutines.Dispatchers
@@ -41,3 +46,5 @@ actual fun unzipMusicXml(mxlPath: Path, xmlPath: Path) {
     }
     zipFileSystem.close()
 }
+
+

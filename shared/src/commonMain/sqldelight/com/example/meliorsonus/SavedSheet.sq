@@ -1,9 +1,8 @@
 CREATE TABLE SavedSheet (
     mxl TEXT NOT NULL PRIMARY KEY,
+    pdf_icon TEXT NOT NULL,
     title TEXT NOT NULL,
-    artist_name TEXT NOT NULL,
-    composer_name TEXT NOT NULL,
-    publisher TEXT NOT NULL,
+    composer TEXT NOT NULL,
     song_length_bars INTEGER NOT NULL DEFAULT 0,
     genres TEXT NOT NULL DEFAULT '',
     instruments TEXT NOT NULL DEFAULT '',
@@ -11,8 +10,8 @@ CREATE TABLE SavedSheet (
 );
 
 insertSavedSheet:
-INSERT OR REPLACE INTO SavedSheet(mxl, title, artist_name, composer_name, publisher, song_length_bars, genres, instruments,  saved_at)
-VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?);
+INSERT OR REPLACE INTO SavedSheet(mxl, pdf_icon, title, composer, song_length_bars, genres, instruments, saved_at)
+VALUES (?, ?, ?, ?, ?, ?, ?, ?);
 
 getAllSavedSheets:
 SELECT * FROM SavedSheet ORDER BY saved_at DESC;
@@ -25,3 +24,6 @@ DELETE FROM SavedSheet WHERE mxl = ?;
 
 countSavedSheets:
 SELECT COUNT(*) FROM SavedSheet;
+
+checkExists:
+SELECT EXISTS(SELECT 1 FROM SavedSheet WHERE mxl = ? LIMIT 1);

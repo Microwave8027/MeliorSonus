@@ -4,14 +4,34 @@ import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.staticCompositionLocalOf
+
+import androidx.compose.ui.graphics.Color
+
+data class FeedbackColors(
+    val important: Color,
+    val tip: Color,
+    val feedback: Color
+)
+
+val LocalFeedbackColors = staticCompositionLocalOf {
+    FeedbackColors(
+        important = Color.Red,
+        tip = Color.Blue,
+        feedback = Color.Green
+    )
+}
 
 // Dark Mode: Background is Black (RichBlack), Text is White with slight yellow (WarmWhite)
 private val DarkColorScheme = darkColorScheme(
-    primary = WarmWhite,
+    primary = LightPurple,
     onPrimary = RichBlack,
-    secondary = WarmWhite,
+    primaryContainer = MildPurple,
+    onPrimaryContainer = WarmWhite,
+    secondary = LightPurple,
     onSecondary = RichBlack,
-    tertiary = WarmWhite,
+    tertiary = LightPurple,
     onTertiary = RichBlack,
     background = RichBlack,
     onBackground = WarmWhite,
@@ -19,19 +39,21 @@ private val DarkColorScheme = darkColorScheme(
     onSurface = WarmWhite,
     surfaceVariant = RichBlack,
     onSurfaceVariant = WarmWhite,
-    outline = WarmWhite,
-    outlineVariant = WarmWhite,
-    error = WarmWhite,
-    onError = RichBlack
+    outline = LightPurple,
+    outlineVariant = LightPurple,
+    error = red,
+    onError = red,
 )
 
 // Light Mode: Background is White with slight yellow (WarmWhite), Text is Black (RichBlack)
 private val LightColorScheme = lightColorScheme(
-    primary = RichBlack,
+    primary = MildPurple,
     onPrimary = WarmWhite,
-    secondary = RichBlack,
+    primaryContainer = WarmWhite,
+    onPrimaryContainer = MildPurple,
+    secondary = LightPurple,
     onSecondary = WarmWhite,
-    tertiary = RichBlack,
+    tertiary = MildPurple,
     onTertiary = WarmWhite,
     background = WarmWhite,
     onBackground = RichBlack,
@@ -39,10 +61,10 @@ private val LightColorScheme = lightColorScheme(
     onSurface = RichBlack,
     surfaceVariant = WarmWhite,
     onSurfaceVariant = RichBlack,
-    outline = RichBlack,
-    outlineVariant = RichBlack,
-    error = RichBlack,
-    onError = WarmWhite
+    outline = MildPurple,
+    outlineVariant = MildPurple,
+    error = red,
+    onError = red
 )
 
 @Composable
@@ -51,12 +73,27 @@ fun GlobalMaterialTheme(
     content: @Composable () -> Unit
 ) {
     val colorScheme = if (darkTheme) DarkColorScheme else LightColorScheme
+    val feedbackColors = if (darkTheme) {
+        FeedbackColors(
+            important = ImportantRedDark,
+            tip = TipBlueDark,
+            feedback = FeedbackGreenDark
+        )
+    } else {
+        FeedbackColors(
+            important = ImportantRed,
+            tip = TipBlue,
+            feedback = FeedbackGreen
+        )
+    }
 
-    MaterialTheme(
-        colorScheme = colorScheme,
-        typography = MeliorSonusTypography,
-        content = content
-    )
+    CompositionLocalProvider(LocalFeedbackColors provides feedbackColors) {
+        MaterialTheme(
+            colorScheme = colorScheme,
+            typography = MeliorSonusTypography,
+            content = content
+        )
+    }
 }
 
 object GlobalMaterialTheme {
@@ -74,4 +111,9 @@ object GlobalMaterialTheme {
         @Composable
         @ReadOnlyComposable
         get() = MaterialTheme.shapes
+
+    val feedbackColors: FeedbackColors
+        @Composable
+        @ReadOnlyComposable
+        get() = LocalFeedbackColors.current
 }

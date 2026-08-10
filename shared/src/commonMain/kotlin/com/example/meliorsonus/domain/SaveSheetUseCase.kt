@@ -11,19 +11,20 @@ class SaveSheetUseCase(
     suspend operator fun invoke(result: SheetSearchResult): String = withContext(Dispatchers.Default) {
 
         val normalizedMxlPath = result.mxl.replace("\\", "/")
+        val normalizedPDFPath = result.pdf.replace("\\", "/").substringAfterLast("/")
 
         println("SaveSheetUseCase: Saving path: ${normalizedMxlPath.take(30)}")
-
-        savedSheetRepository.saveSheet(
-            mxl = normalizedMxlPath,
-            title = result.title,
-            artistName = result.artistName,
-            composerName = result.composerName,
-            publisher = result.publisher,
-            songLengthBars = result.songLengthBars.toLong(),
-            genres = result.genres,
-            instruments = result.instruments.joinToString(", "),
-        )
+        if (!savedSheetRepository.checkExistance(mxl = result.mxl)) {
+            savedSheetRepository.saveSheet(
+                mxl = normalizedMxlPath,
+                pdf = normalizedPDFPath,
+                title = result.title,
+                composer = result.composer,
+                songLengthBars = result.songLengthBars.toLong(),
+                genres = result.genres,
+                instruments = result.instruments.joinToString(", "),
+            )
+        }
         normalizedMxlPath
     }
 }

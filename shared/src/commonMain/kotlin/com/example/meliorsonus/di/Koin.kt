@@ -3,6 +3,7 @@ package com.example.meliorsonus.di
 import coil3.ImageLoader
 import coil3.request.crossfade
 import coil3.svg.SvgDecoder
+import com.example.meliorsonus.domain.SaveAndDeletePDFUseCase
 import com.example.meliorsonus.domain.SaveSheetUseCase
 import com.example.meliorsonus.network.SheetSearchDataSource
 import com.example.meliorsonus.repository.UserSettingsRepositoryImpl
@@ -29,5 +30,6 @@ val commonModule = module {
 
     // Use cases
     factory { SaveSheetUseCase(get()) }
+    factory { SaveAndDeletePDFUseCase(get()) }
 }
 

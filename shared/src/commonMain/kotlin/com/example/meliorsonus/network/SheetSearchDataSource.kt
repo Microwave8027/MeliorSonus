@@ -13,9 +13,11 @@ import com.example.meliorsonus.util.ioDispatcher
 class SheetSearchDataSource(private val client: HttpClient) {
 
     // Returns sorted list of results (index 0..9) from /search endpoint
-    suspend fun searchSheets(query: String): List<SheetSearchResult> = withContext(ioDispatcher) {
+    suspend fun searchSheets(query: String, pages: Int, instrument: String): List<SheetSearchResult> = withContext(ioDispatcher) {
         val response: SheetSearchResponse = client.get("$baseUrl/search") {
             parameter("query", query)
+            parameter("index", pages)
+            parameter("instrument", instrument)
         }.body()
         response.results.values.toList()
     }

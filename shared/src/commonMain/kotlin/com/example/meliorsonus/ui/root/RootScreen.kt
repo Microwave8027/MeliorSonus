@@ -5,8 +5,8 @@ import androidx.compose.ui.Modifier
 import com.arkivanov.decompose.extensions.compose.stack.Children
 import com.arkivanov.decompose.extensions.compose.stack.animation.slide
 import com.arkivanov.decompose.extensions.compose.stack.animation.stackAnimation
-import com.example.meliorsonus.ui.home.HomeScreen
-import com.example.meliorsonus.ui.sheetviewer.SheetViewerScreen
+import com.example.meliorsonus.ui.home.core.HomeScreen
+import com.example.meliorsonus.ui.sheetviewer.core.SheetViewerScreen
 
 @Composable
 fun RootScreen(

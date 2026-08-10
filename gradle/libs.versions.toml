@@ -26,8 +26,9 @@ decompose = "3.1.0"
 essenty = "2.1.0"
 okio = "3.9.0"
 coil = "3.5.0"
-ndk = "30.0.15729638"
+ndk = "29.0.14206865"
 cmake = "4.1.2"
+cargo = "0.2.0"
 
 [libraries]
 androidsvg = { module = "com.caverock:androidsvg-aar", version.ref = "androidsvg" }
@@ -83,6 +84,7 @@ kotlinx-serialization-json-okio = { module = "org.jetbrains.kotlinx:kotlinx-seri
 
 [plugins]
 androidApplication = { id = "com.android.application", version.ref = "agp" }
+androidLibrary = { id = "com.android.library", version.ref = "agp" }
 androidMultiplatformLibrary = { id = "com.android.kotlin.multiplatform.library", version.ref = "agp" }
 composeMultiplatform = { id = "org.jetbrains.compose", version.ref = "composeMultiplatform" }
 composeCompiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
@@ -91,3 +93,4 @@ kotlinMultiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref =
 kotlinxSerialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 wire = { id = "com.squareup.wire", version.ref = "wire" }
 sqldelight = { id = "app.cash.sqldelight", version.ref = "sqldelight" }
+cargo = { id = "dev.gobley.cargo", version.ref = "cargo"}

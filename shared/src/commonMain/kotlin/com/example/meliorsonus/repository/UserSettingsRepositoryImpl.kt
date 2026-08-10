@@ -8,6 +8,7 @@ interface UserSettingsRepository {
     val userSettings: Flow<UserSettings>
     suspend fun updateUsername(username: String)
     suspend fun updateTheme(theme: String)
+    suspend fun updateLanguage(lan: String)
 }
 
 class UserSettingsRepositoryImpl(
@@ -18,13 +19,19 @@ class UserSettingsRepositoryImpl(
 
     override suspend fun updateUsername(username: String) {
         dataStore.updateData { currentSettings ->
-            currentSettings.copy(username = username)
+            currentSettings.copy(username = username,)
         }
     }
 
     override suspend fun updateTheme(theme: String) {
         dataStore.updateData { currentSettings ->
-            currentSettings.copy(customization_theme = theme)
+            currentSettings.copy(customization_theme = theme,)
+        }
+    }
+
+    override suspend fun updateLanguage(lan: String) {
+        dataStore.updateData { currentSettings ->
+            currentSettings.copy(language = lan)
         }
     }
 }
