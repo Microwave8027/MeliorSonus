@@ -11,7 +11,6 @@ import org.koin.dsl.module
 
 actual val platformModule: Module = module {
     single { DataStoreFactory().create() }
-    // Provides SqlDriver; MeliorSonusDatabase is wired in databaseModule (nonWasmMain)
     single { DatabaseDriverFactory().create() }
     single<PlatformContext> { PlatformContext.INSTANCE }
     // Coil

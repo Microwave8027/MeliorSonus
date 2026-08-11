@@ -1,5 +1,5 @@
 [versions]
-agp = "9.2.1"
+agp = "8.13.0"
 android-compileSdk = "37"
 android-minSdk = "26"
 android-targetSdk = "37"
@@ -28,7 +28,7 @@ okio = "3.9.0"
 coil = "3.5.0"
 ndk = "29.0.14206865"
 cmake = "4.1.2"
-cargo = "0.2.0"
+uniffi = "0.3.7"
 
 [libraries]
 androidsvg = { module = "com.caverock:androidsvg-aar", version.ref = "androidsvg" }
@@ -62,7 +62,7 @@ ktor-client-core = { module = "io.ktor:ktor-client-core", version.ref = "ktor" }
 ktor-client-okhttp = { module = "io.ktor:ktor-client-okhttp", version.ref = "ktor" }
 ktor-client-darwin = { module = "io.ktor:ktor-client-darwin", version.ref = "ktor" }
 ktor-client-cio = { module = "io.ktor:ktor-client-cio", version.ref = "ktor" }
-ktor-client-js = { module = "io.ktor:ktor-client-js", version.ref = "ktor" }
+ktor-client-mock = { module = "io.ktor:ktor-client-mock", version.ref = "ktor"}
 ktor-client-content-negotiation = { module = "io.ktor:ktor-client-content-negotiation", version.ref = "ktor" }
 ktor-serialization-kotlinx-json = { module = "io.ktor:ktor-serialization-kotlinx-json", version.ref = "ktor" }
 wire-runtime = { module = "com.squareup.wire:wire-runtime", version.ref = "wire" }
@@ -83,6 +83,7 @@ coil-svg = { module = "io.coil-kt.coil3:coil-svg", version.ref = "coil" }
 kotlinx-serialization-json-okio = { module = "org.jetbrains.kotlinx:kotlinx-serialization-json-okio", version.ref = "kotlnx-serialization-json-okio" }
 
 [plugins]
+kotlin-atomicfu = { id = "org.jetbrains.kotlin.plugin.atomicfu", version.ref = "kotlin" }
 androidApplication = { id = "com.android.application", version.ref = "agp" }
 androidLibrary = { id = "com.android.library", version.ref = "agp" }
 androidMultiplatformLibrary = { id = "com.android.kotlin.multiplatform.library", version.ref = "agp" }
@@ -90,7 +91,9 @@ composeMultiplatform = { id = "org.jetbrains.compose", version.ref = "composeMul
 composeCompiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 kotlinJvm = { id = "org.jetbrains.kotlin.jvm", version.ref = "kotlin" }
 kotlinMultiplatform = { id = "org.jetbrains.kotlin.multiplatform", version.ref = "kotlin" }
+kotlinAndroid = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 kotlinxSerialization = { id = "org.jetbrains.kotlin.plugin.serialization", version.ref = "kotlin" }
 wire = { id = "com.squareup.wire", version.ref = "wire" }
 sqldelight = { id = "app.cash.sqldelight", version.ref = "sqldelight" }
-cargo = { id = "dev.gobley.cargo", version.ref = "cargo"}
+cargo = { id = "dev.gobley.cargo", version.ref = "uniffi"}
+uniffi = { id = "dev.gobley.uniffi", version.ref = "uniffi" }

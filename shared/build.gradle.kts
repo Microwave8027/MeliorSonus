@@ -2,17 +2,40 @@
 
 plugins {
     alias(libs.plugins.kotlinMultiplatform)
-    alias(libs.plugins.androidMultiplatformLibrary)
+    alias(libs.plugins.androidLibrary)
     alias(libs.plugins.composeMultiplatform)
     alias(libs.plugins.composeCompiler)
     alias(libs.plugins.kotlinxSerialization)
     alias(libs.plugins.wire)
     alias(libs.plugins.sqldelight)
+    id("dev.gobley.cargo")
+    id("dev.gobley.uniffi")
+    id("org.jetbrains.kotlin.plugin.atomicfu")
     kotlin("native.cocoapods")
 }
 
+android {
+    namespace = "com.example.meliorsonus.shared"
+    compileSdk = libs.versions.android.compileSdk.get().toInt()
+    ndkVersion = libs.versions.ndk.get()
+
+    defaultConfig {
+        minSdk = libs.versions.android.minSdk.get().toInt()
+    }
+
+    androidResources {
+        enable = true
+    }
+    testOptions {
+        unitTests {
+            isIncludeAndroidResources = true
+        }
+    }
+}
 
 kotlin {
+    androidTarget()
+
     listOf(
         iosArm64(),
         iosSimulatorArm64()
@@ -35,25 +58,10 @@ kotlin {
         // This ensures the .mm and .cpp files are compiled and linked by Xcode
         extraSpecAttributes["source_files"] = "'src/iosMain/objc/data_sources/**/*.{h,m,mm}'"
     }
-    
 
-    
-    android {
-       namespace = "com.example.meliorsonus.shared"
-       compileSdk = libs.versions.android.compileSdk.get().toInt()
-       minSdk = libs.versions.android.minSdk.get().toInt()
-    
-
-       androidResources {
-           enable = true
-       }
-       withHostTest {
-           isIncludeAndroidResources = true
-       }
-    }
-    
     sourceSets {
         commonMain {
+            kotlin.srcDir("build/generated/source/wire/commonMain")
             resources.srcDirs("src/commonMain/resources")
         }
         androidMain.dependencies {
@@ -65,7 +73,7 @@ kotlin {
             implementation("net.java.dev.jna:jna:5.14.0@aar")
         }
 
-        val androidHostTest by getting {
+        val androidUnitTest by getting {
             dependencies {
                 implementation(libs.sqldelight.sqlite.driver)
             }
@@ -99,6 +107,7 @@ kotlin {
             implementation(libs.ktor.client.content.negotiation)
             implementation(libs.ktor.serialization.kotlinx.json)
             implementation(libs.kotlinx.serialization.json.okio)
+            implementation(libs.ktor.client.mock)
             
             // Wire Proto, Okio & DataStore
             implementation(libs.wire.runtime)
@@ -119,19 +128,19 @@ kotlin {
             implementation(libs.kotlinx.coroutines.test)
         }
         iosMain.dependencies {
-            implementation(libs.ktor.client.cio)
+            implementation(libs.ktor.client.darwin)
             implementation(libs.sqldelight.native.driver)
         }
     }
 }
 
-dependencies {
-    androidRuntimeClasspath(libs.compose.uiTooling)
-}
-
 wire {
+    sourcePath {
+        srcDir("src/commonMain/proto")
+    }
     kotlin {
-        // Wire generates kotlin classes from the proto schemas
+        out = "build/generated/source/wire/commonMain"
+        rpcRole = "none"
     }
 }
 
@@ -139,6 +148,7 @@ sqldelight {
     databases {
         create("MeliorSonusDatabase") {
             packageName.set("com.example.meliorsonus.db")
+            verifyMigrations.set(false)
         }
     }
 }
@@ -148,3 +158,35 @@ androidComponents {
         variant.sources.assets?.addStaticSourceDirectory("src/commonMain/webview")
     }
 }
+
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompilationTask<*>>().configureEach {
+    dependsOn(tasks.matching { it.name.endsWith("Protos", ignoreCase = true) })
+}
+
+tasks.matching {
+    it.name.contains("Ios", ignoreCase = true) &&
+    (it.name.contains("cargo", ignoreCase = true) ||
+     it.name.contains("rust", ignoreCase = true) ||
+     it.name.contains("uniffi", ignoreCase = true) ||
+     it.name.contains("cinterop", ignoreCase = true))
+}.configureEach {
+    enabled = false
+}
+
+tasks.matching { it.name.contains("verify", ignoreCase = true) && it.name.contains("Migration", ignoreCase = true) }.configureEach {
+    enabled = false
+}
+
+tasks.register("sync") {
+    group = "ide"
+    description = "Explicit root sync task to prevent Gradle task abbreviation ambiguity."
+
+    val sharedProject = evaluationDependsOn(":shared")
+    dependsOn(sharedProject.tasks.matching {
+        (it.name.startsWith("cargo") || it.name.contains("Uniffi")) &&
+        !it.name.contains("Ios", ignoreCase = true) &&
+        !it.name.contains("Clean", ignoreCase = true)
+    })
+}
+
+

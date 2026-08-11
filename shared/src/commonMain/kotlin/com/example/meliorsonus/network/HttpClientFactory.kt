@@ -7,5 +7,4 @@ import io.ktor.client.*
  * Each platform supplies its own engine (CIO for JVM/Android/iOS, JS for web targets).
  */
 expect val createHttpClient: HttpClient
-
 expect val baseUrl: String

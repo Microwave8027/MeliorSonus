@@ -50,7 +50,10 @@ This workflow provides essential Gradle commands for building, testing, and main
   `./gradlew clean generateSqlDelightInterface generateProtos`
 
 ## Maintenance and Debugging
-
+- **Print full errors:**
+  `./gradlew help --warning-mode all`
+- **Build with Stacktrace:**
+  `./gradlew build --stacktrace`
 - **Clean Project:**
   `./gradlew clean`
 - **Refresh Dependencies:**
@@ -68,3 +71,12 @@ This workflow provides essential Gradle commands for building, testing, and main
   `./gradlew check`
 - **Kotlin Linting (if applied):**
   `./gradlew ktlintCheck` or `./gradlew detekt`
+
+## Cargo For Rust
+
+- **checking for errors:**
+  `cargo check --manifest-path shared/Cargo.toml`
+- **build rust library:**
+  `cargo build --manifest-path shared/Cargo.toml`
+- **run rust tests:**
+  `cargo test --manifest-path shared/Cargo.toml`
