@@ -5,6 +5,7 @@ edition = "2024"
 
 [dependencies]
 uniffi = "0.29.4"
+cpal = "0.18.1"
 
 [lib]
 crate-type = ["cdylib", "staticlib"]
