@@ -6,6 +6,10 @@ edition = "2024"
 [dependencies]
 uniffi = "0.29.4"
 cpal = "0.18.1"
+log = "0.4"
+android_logger = "0.13"
+hound = "3.5"
+ringbuf = "0.4"
 
 [lib]
 crate-type = ["cdylib", "staticlib"]

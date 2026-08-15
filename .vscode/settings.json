@@ -1,0 +1,6 @@
+{
+  "rust-analyzer.server.path": "C:\\Users\\micro\\.cargo\\bin\\rust-analyzer.exe",
+  "rust-analyzer.linkedProjects": [
+    "shared/Cargo.toml"
+  ]
+}
