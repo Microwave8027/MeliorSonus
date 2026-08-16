@@ -10,8 +10,14 @@ log = "0.4"
 android_logger = "0.13"
 hound = "3.5"
 ringbuf = "0.4"
+pitch-detection = "0.3"
 
 [lib]
-crate-type = ["cdylib", "staticlib"]
+crate-type = ["cdylib", "staticlib", "rlib"]
 path = "src/commonMain/rust/lib.rs"
+
+[[example]]
+name = "mic_listener"
+path = "rust_examples/mic_listener.rs"
+
 

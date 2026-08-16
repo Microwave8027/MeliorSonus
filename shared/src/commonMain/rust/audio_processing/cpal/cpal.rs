@@ -16,6 +16,7 @@
 
 use crate::high_pass_filter::BandPassFilter;
 use crate::instruments::Instrument;
+use crate::mpm::MPM;
 use crate::prelude::*;
 use cpal::SampleFormat;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
@@ -27,12 +28,13 @@ pub const RINGBUF_CAPACITY: usize = 16384;
 pub const PREFERRED_RATES: [u32; 2] = [44100, 48000];
 pub const HOP_SIZE: usize = FRAME_SIZE / 2;
 
-pub struct AudioEngine {
+pub struct AudioEngine<T: DspCallBack + Clone> {
     signal_tx: Option<mpsc::Sender<EngineSignal>>,
     pub is_playing: Arc<AtomicBool>,
     pub thread_error: Arc<Mutex<Option<ThreadError>>>,
     supervisor_handle: Option<thread::JoinHandle<()>>,
     instrument: Arc<Instrument>,
+    dsp_callback: T,
 }
 
 enum EngineSignal {
@@ -41,27 +43,25 @@ enum EngineSignal {
     Closed,
     Error { message: String }, // This type of error is always retryable
 }
+
 pub enum ThreadError {
     StreamBuildError(String),
     BufferOverfill,
 }
-impl AudioEngine {
-    pub fn new(instrument: Instrument) -> Self {
+
+impl<T: DspCallBack + Clone> AudioEngine<T> {
+    pub fn new(instrument: Instrument, dsp_callback: T) -> Self {
         AudioEngine {
             signal_tx: None,
             is_playing: Arc::new(AtomicBool::new(false)),
             thread_error: Arc::new(Mutex::new(None)),
             supervisor_handle: None,
             instrument: Arc::new(instrument),
+            dsp_callback: dsp_callback,
         }
     }
 
-    pub fn play(
-        &mut self,
-        mut dsp_callback: impl FnMut([f32; FRAME_SIZE], &StreamConfig, &mut BandPassFilter)
-        + Send
-        + 'static,
-    ) -> Result<(), Box<dyn Error>> {
+    pub fn play(&mut self) -> Result<(), Box<dyn Error>> {
         if self.thread_error.lock().unwrap().is_some() {
             return Err(format!("Reset Audio Engine and read errors before playing again").into());
         }
@@ -71,6 +71,8 @@ impl AudioEngine {
                 return Err("Audio engine is already playing".into());
             }
         }
+
+        let mut callback = self.dsp_callback.clone();
 
         let (tx, rx) = mpsc::channel();
         // Build initial stream. If this fails, return Err immediately to caller
@@ -85,8 +87,9 @@ impl AudioEngine {
 
         let handle = thread::spawn(move || {
             let _guard = DropGuard::from(is_playing);
-
             let mut stream: Option<Stream> = Some(initial_stream);
+
+            // Singletons bound to the stream
             let mut config: Option<StreamConfig> = Some(initial_config.clone());
             let mut frame = [0.0f32; FRAME_SIZE];
             let mut irr_filter_inst: Option<BandPassFilter> = Some(BandPassFilter::new(
@@ -95,20 +98,22 @@ impl AudioEngine {
                 initial_config.sample_rate as u32,
             ));
             let mut c: Option<HeapCons<f32>> = Some(consumer);
+            let mut mpm: Option<MPM> = Some(MPM::new(FRAME_SIZE / 2));
 
             'supervisor: loop {
                 // Rebuilds the stream if it was destroyed by a runtime error
                 if stream.is_none() {
                     match Self::build_stream(&tx) {
                         Ok((st, cf, cons)) => {
-                            stream = Some(st);
-                            config = Some(cf.clone());
-                            c = Some(cons);
                             irr_filter_inst = Some(BandPassFilter::new(
                                 insturment.filter_range().hpf_cutoff_hz,
                                 insturment.filter_range().harmonic_ceiling_hz,
                                 cf.sample_rate as u32,
                             ));
+                            config = Some(cf);
+                            stream = Some(st);
+                            c = Some(cons);
+                            mpm = Some(MPM::new(FRAME_SIZE / 2))
                         }
                         Err(e) => {
                             log::error!("Stream build failed: {}", e);
@@ -182,8 +187,14 @@ impl AudioEngine {
                                 .copy_from_slice(&second[..FRAME_SIZE - first_len]);
                         }
 
-                        if let Some(filter) = &mut irr_filter_inst {
-                            dsp_callback(frame, cfg, filter);
+                        if let (Some(filter), Some(mpm)) = (&mut irr_filter_inst, &mut mpm) {
+                            callback.dsp_callback(CallBackParameters {
+                                buffer: &frame,
+                                cfg,
+                                filter,
+                                instrument: &insturment,
+                                mpm,
+                            });
                         }
 
                         processed = true;
@@ -365,7 +376,7 @@ impl AudioEngine {
     }
 }
 
-impl Drop for AudioEngine {
+impl<T: DspCallBack + Clone> Drop for AudioEngine<T> {
     fn drop(&mut self) {
         self.end()
     }

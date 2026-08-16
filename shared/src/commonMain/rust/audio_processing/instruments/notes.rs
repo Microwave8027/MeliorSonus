@@ -1,9 +1,12 @@
+#[derive(Clone)]
 pub struct Note {
     pitch: Pitch,
     octave: Octave,
     tonality_offset: i8, // meant to check for cent sharpness
+    loudness_dbfs: f32,
 }
 
+#[derive(Clone)]
 pub enum Pitch {
     C,
     CsDf,
@@ -20,6 +23,7 @@ pub enum Pitch {
 }
 
 #[allow(non_camel_case_types)]
+#[derive(Clone)]
 pub enum Octave {
     OutOfRange,
     O_1,
@@ -37,7 +41,7 @@ pub enum Octave {
 }
 
 impl Note {
-    pub fn get_note(sampling_rate: u32, tau: f32) -> Option<Note> {
+    pub fn get_note(sampling_rate: u32, tau: f32, dbfs: f32) -> Option<Note> {
         if tau == 0.0 {
             return None;
         }
@@ -51,6 +55,7 @@ impl Note {
             pitch,
             octave,
             tonality_offset,
+            loudness_dbfs: dbfs,
         })
     }
 }

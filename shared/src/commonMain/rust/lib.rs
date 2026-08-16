@@ -6,9 +6,10 @@ pub use paths::*;
 pub mod prelude {
     pub use crate::audio_engine::AudioEngine;
     pub use crate::card::{Card, CardType};
-    pub use crate::dsp::DspCallBack;
+    pub use crate::dsp::{CallBackParameters, DspCallBack};
     pub use crate::errors::*;
     pub use crate::guard::DropGuard;
+    pub use crate::instruments::{FilterRange, Instrument, MpmConfig};
     pub use cpal::{Stream, StreamConfig};
     pub use std::error::Error;
     pub use std::sync::atomic::{AtomicBool, Ordering};

@@ -39,7 +39,75 @@ pub struct FilterRange {
     pub harmonic_ceiling_hz: f32,
 }
 
+#[derive(Debug, Clone, Copy)]
+pub struct MpmConfig {
+    pub power_threshold: f32,
+    pub clarity_threshold: f32,
+}
+
 impl Instrument {
+    pub fn mpm_config(&self) -> MpmConfig {
+        match self {
+            // Strings - Bowed
+            Instrument::Violin | Instrument::Viola | Instrument::Cello => MpmConfig {
+                power_threshold: 0.010,
+                clarity_threshold: 0.78,
+            },
+            Instrument::DoubleBass => MpmConfig {
+                power_threshold: 0.008,
+                clarity_threshold: 0.68,
+            },
+
+            // Strings - Plucked / Guitars & Basses
+            Instrument::AcousticGuitar | Instrument::ElectricGuitar => MpmConfig {
+                power_threshold: 0.015,
+                clarity_threshold: 0.72,
+            },
+            Instrument::ElectricBass4 | Instrument::ElectricBass5 => MpmConfig {
+                power_threshold: 0.008,
+                clarity_threshold: 0.68,
+            },
+
+            // Woodwinds
+            Instrument::Flute | Instrument::ClarinetBb | Instrument::Oboe => MpmConfig {
+                power_threshold: 0.010,
+                clarity_threshold: 0.85,
+            },
+            Instrument::Bassoon | Instrument::AltoSax | Instrument::TenorSax => MpmConfig {
+                power_threshold: 0.010,
+                clarity_threshold: 0.80,
+            },
+
+            // Brass
+            Instrument::TrumpetBb | Instrument::FrenchHorn | Instrument::TromboneTenor => MpmConfig {
+                power_threshold: 0.010,
+                clarity_threshold: 0.80,
+            },
+            Instrument::Tuba => MpmConfig {
+                power_threshold: 0.008,
+                clarity_threshold: 0.68,
+            },
+
+            // Keyboard / Piano
+            Instrument::GrandPiano => MpmConfig {
+                power_threshold: 0.010,
+                clarity_threshold: 0.75,
+            },
+
+            // Vocals
+            Instrument::VoiceSoprano | Instrument::VoiceTenor | Instrument::VoiceBass => MpmConfig {
+                power_threshold: 0.008,
+                clarity_threshold: 0.65,
+            },
+
+            // Generic / Fallback / Custom
+            Instrument::Generic | Instrument::Custom { .. } => MpmConfig {
+                power_threshold: 0.010,
+                clarity_threshold: 0.75,
+            },
+        }
+    }
+
     pub fn filter_range(&self) -> FilterRange {
         match self {
             // Strings

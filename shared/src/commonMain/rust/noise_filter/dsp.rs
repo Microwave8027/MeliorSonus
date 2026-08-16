@@ -29,13 +29,25 @@ Raw Floats (&[f32])
 * The entire workflow is done on one threadw(its cpu bound)
 */
 
-use crate::{high_pass_filter::BandPassFilter, prelude::*};
+use crate::{high_pass_filter::BandPassFilter, instruments::Instrument, mpm::MPM, prelude::*};
 
+pub struct CallBackParameters<'a> {
+    pub buffer: &'a [f32; FRAME_SIZE],
+    pub cfg: &'a StreamConfig,
+    pub filter: &'a mut BandPassFilter,
+    pub instrument: &'a Instrument,
+    pub mpm: &'a mut MPM,
+}
 pub trait DspCallBack: Send + 'static {
     fn dsp_callback(
-        &self,
-        buffer: [f32; FRAME_SIZE],
-        cfg: &StreamConfig,
-        filter: &mut BandPassFilter,
-    ) -> ();
+        &mut self,
+        CallBackParameters {
+            buffer: _,
+            cfg: _,
+            filter: _,
+            instrument: _,
+            mpm: _,
+        }: CallBackParameters,
+    ) -> () {
+    }
 }
