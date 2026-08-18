@@ -24,6 +24,8 @@ impl MPM {
     ) -> f32 {
         let sample_rate = cfg.sample_rate as usize;
         let config = instrument.mpm_config();
+        let range = instrument.filter_range();
+
         let pitch = self.pitch_detector.get_pitch(
             &frame[..],
             sample_rate,
@@ -31,8 +33,10 @@ impl MPM {
             config.clarity_threshold,
         );
         match pitch {
-            Some(p) => p.frequency,
-            None => 0.0f32,
+            Some(p) if p.frequency >= range.min_f0_hz && p.frequency <= range.max_f0_hz => {
+                p.frequency
+            }
+            _ => 0.0f32,
         }
     }
 }

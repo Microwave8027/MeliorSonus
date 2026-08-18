@@ -23,7 +23,6 @@ Raw Floats (&[f32])
 │  ├─ Spectral Denoising (Spectral Subtraction / Wiener)   │
 │  ├─ Harmonics-to-Noise Ratio (HNR) & Spectral Flatness   │
 │  ├─ Spectral Centroid (Tone Brightness)                  │
-│  └─ Push Slices to 60 FPS Visualizer                     │
 └──────────────────────────────────────────────────────────┘
 * In fact, noise cancellation might not even be used
 * The entire workflow is done on one threadw(its cpu bound)

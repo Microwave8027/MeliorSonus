@@ -1,3 +1,6 @@
+/* TOLO:
+*  Might need to add more implementations for the custom enum
+*/
 #[derive(uniffi::Enum, Debug, Clone, Copy)]
 pub enum Instrument {
     Violin,
@@ -18,7 +21,7 @@ pub enum Instrument {
     FrenchHorn,
     TromboneTenor,
     Tuba,
-    GrandPiano,
+    Piano,
     VoiceSoprano,
     VoiceTenor,
     VoiceBass,
@@ -43,67 +46,88 @@ pub struct FilterRange {
 pub struct MpmConfig {
     pub power_threshold: f32,
     pub clarity_threshold: f32,
+    pub is_strictly_monophonic: bool,
+    pub min_poly_clarity: f32,
 }
 
 impl Instrument {
     pub fn mpm_config(&self) -> MpmConfig {
         match self {
-            // Strings - Bowed
             Instrument::Violin | Instrument::Viola | Instrument::Cello => MpmConfig {
                 power_threshold: 0.010,
                 clarity_threshold: 0.78,
+                is_strictly_monophonic: false,
+                min_poly_clarity: 0.60,
             },
             Instrument::DoubleBass => MpmConfig {
                 power_threshold: 0.008,
                 clarity_threshold: 0.68,
+                is_strictly_monophonic: false,
+                min_poly_clarity: 0.55,
             },
 
-            // Strings - Plucked / Guitars & Basses
             Instrument::AcousticGuitar | Instrument::ElectricGuitar => MpmConfig {
                 power_threshold: 0.015,
                 clarity_threshold: 0.72,
+                is_strictly_monophonic: false,
+                min_poly_clarity: 0.50,
             },
             Instrument::ElectricBass4 | Instrument::ElectricBass5 => MpmConfig {
                 power_threshold: 0.008,
                 clarity_threshold: 0.68,
+                is_strictly_monophonic: false,
+                min_poly_clarity: 0.55,
             },
 
-            // Woodwinds
             Instrument::Flute | Instrument::ClarinetBb | Instrument::Oboe => MpmConfig {
                 power_threshold: 0.010,
                 clarity_threshold: 0.85,
+                is_strictly_monophonic: true,
+                min_poly_clarity: 0.70,
             },
             Instrument::Bassoon | Instrument::AltoSax | Instrument::TenorSax => MpmConfig {
                 power_threshold: 0.010,
                 clarity_threshold: 0.80,
+                is_strictly_monophonic: true,
+                min_poly_clarity: 0.65,
             },
 
-            // Brass
-            Instrument::TrumpetBb | Instrument::FrenchHorn | Instrument::TromboneTenor => MpmConfig {
-                power_threshold: 0.010,
-                clarity_threshold: 0.80,
-            },
+            Instrument::TrumpetBb | Instrument::FrenchHorn | Instrument::TromboneTenor => {
+                MpmConfig {
+                    power_threshold: 0.010,
+                    clarity_threshold: 0.80,
+                    is_strictly_monophonic: true,
+                    min_poly_clarity: 0.65,
+                }
+            }
             Instrument::Tuba => MpmConfig {
                 power_threshold: 0.008,
                 clarity_threshold: 0.68,
+                is_strictly_monophonic: true,
+                min_poly_clarity: 0.55,
             },
 
-            // Keyboard / Piano
-            Instrument::GrandPiano => MpmConfig {
+            Instrument::Piano => MpmConfig {
                 power_threshold: 0.010,
                 clarity_threshold: 0.75,
+                is_strictly_monophonic: false,
+                min_poly_clarity: 0.50,
             },
 
-            // Vocals
-            Instrument::VoiceSoprano | Instrument::VoiceTenor | Instrument::VoiceBass => MpmConfig {
-                power_threshold: 0.008,
-                clarity_threshold: 0.65,
-            },
+            Instrument::VoiceSoprano | Instrument::VoiceTenor | Instrument::VoiceBass => {
+                MpmConfig {
+                    power_threshold: 0.008,
+                    clarity_threshold: 0.65,
+                    is_strictly_monophonic: true,
+                    min_poly_clarity: 0.55,
+                }
+            }
 
-            // Generic / Fallback / Custom
             Instrument::Generic | Instrument::Custom { .. } => MpmConfig {
                 power_threshold: 0.010,
                 clarity_threshold: 0.75,
+                is_strictly_monophonic: false,
+                min_poly_clarity: 0.50,
             },
         }
     }
@@ -145,7 +169,7 @@ impl Instrument {
                 hpf_cutoff_hz: 70.0,
                 min_f0_hz: 82.4,
                 max_f0_hz: 1318.5,
-                harmonic_ceiling_hz: 8000.0,
+                harmonic_ceiling_hz: 12000.0,
             },
             Instrument::ElectricBass4 => FilterRange {
                 hpf_cutoff_hz: 35.0,
@@ -165,7 +189,7 @@ impl Instrument {
                 hpf_cutoff_hz: 220.0,
                 min_f0_hz: 246.9,
                 max_f0_hz: 2349.3,
-                harmonic_ceiling_hz: 16000.0,
+                harmonic_ceiling_hz: 9000.0,
             },
             Instrument::ClarinetBb => FilterRange {
                 hpf_cutoff_hz: 130.0,
@@ -225,7 +249,7 @@ impl Instrument {
             },
 
             // Keyboard / Piano
-            Instrument::GrandPiano => FilterRange {
+            Instrument::Piano => FilterRange {
                 hpf_cutoff_hz: 22.0,
                 min_f0_hz: 27.5,
                 max_f0_hz: 4186.0,

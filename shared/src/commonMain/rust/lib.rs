@@ -8,6 +8,8 @@ pub mod prelude {
     pub use crate::card::{Card, CardType};
     pub use crate::dsp::{CallBackParameters, DspCallBack};
     pub use crate::errors::*;
+    pub use crate::feature_extractor::NoteFeatureExtractorImpl;
+    pub use crate::polyphonic_feature_extractor::{PolyphonicFeatureExtractorImpl, PolyphonyMode};
     pub use crate::guard::DropGuard;
     pub use crate::instruments::{FilterRange, Instrument, MpmConfig};
     pub use cpal::{Stream, StreamConfig};

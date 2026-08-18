@@ -10,6 +10,7 @@
 * If there is a problem building the stream, the audio engine is playing will become false and there will be a StreamBuildError in the thread_ error
 * In that case, the higher up will have to call AudioEngine::reset() to clear the errors and allow the audio engine to be played again
 * If the buffer is near full, then then the stream will exit and the user will need to reset and accomadate for errors. This process should be automatic with an alert on the user side.
+* Feature extractor is now passed into the engine signal. Upon reset a new one will be created
 * Todo:
 ** currently none
 */
@@ -28,13 +29,13 @@ pub const RINGBUF_CAPACITY: usize = 16384;
 pub const PREFERRED_RATES: [u32; 2] = [44100, 48000];
 pub const HOP_SIZE: usize = FRAME_SIZE / 2;
 
-pub struct AudioEngine<T: DspCallBack + Clone> {
+pub struct AudioEngine<T: DspCallBack> {
     signal_tx: Option<mpsc::Sender<EngineSignal>>,
     pub is_playing: Arc<AtomicBool>,
     pub thread_error: Arc<Mutex<Option<ThreadError>>>,
     supervisor_handle: Option<thread::JoinHandle<()>>,
     instrument: Arc<Instrument>,
-    dsp_callback: T,
+    feature_extractor: Option<T>,
 }
 
 enum EngineSignal {
@@ -49,20 +50,20 @@ pub enum ThreadError {
     BufferOverfill,
 }
 
-impl<T: DspCallBack + Clone> AudioEngine<T> {
-    pub fn new(instrument: Instrument, dsp_callback: T) -> Self {
+impl<T: DspCallBack> AudioEngine<T> {
+    pub fn new(instrument: Instrument, feature_extractor: T) -> Self {
         AudioEngine {
             signal_tx: None,
             is_playing: Arc::new(AtomicBool::new(false)),
             thread_error: Arc::new(Mutex::new(None)),
             supervisor_handle: None,
             instrument: Arc::new(instrument),
-            dsp_callback: dsp_callback,
+            feature_extractor: Some(feature_extractor),
         }
     }
 
     pub fn play(&mut self) -> Result<(), Box<dyn Error>> {
-        if self.thread_error.lock().unwrap().is_some() {
+        if self.thread_error.lock().unwrap().is_some() || self.is_playing.load(Ordering::Relaxed) {
             return Err(format!("Reset Audio Engine and read errors before playing again").into());
         }
         // Checks if the thread is already running
@@ -72,7 +73,10 @@ impl<T: DspCallBack + Clone> AudioEngine<T> {
             }
         }
 
-        let mut callback = self.dsp_callback.clone();
+        let mut feature_extractor = self
+            .feature_extractor
+            .take()
+            .expect("Feature extractor should be present");
 
         let (tx, rx) = mpsc::channel();
         // Build initial stream. If this fails, return Err immediately to caller
@@ -188,7 +192,7 @@ impl<T: DspCallBack + Clone> AudioEngine<T> {
                         }
 
                         if let (Some(filter), Some(mpm)) = (&mut irr_filter_inst, &mut mpm) {
-                            callback.dsp_callback(CallBackParameters {
+                            feature_extractor.dsp_callback(CallBackParameters {
                                 buffer: &frame,
                                 cfg,
                                 filter,
@@ -284,7 +288,10 @@ impl<T: DspCallBack + Clone> AudioEngine<T> {
                     2 => {
                         let _ = prod.push_iter(data.chunks_exact(2).map(|c| (c[0] + c[1]) * 0.5));
                     }
-                    _ => {}
+                    _ => {
+                        let ch = channels as usize;
+                        let _ = prod.push_iter(data.chunks_exact(ch).map(|c| c[0]));
+                    }
                 },
                 err_fn,
                 None,
@@ -303,7 +310,11 @@ impl<T: DspCallBack + Clone> AudioEngine<T> {
                                     .map(|c| (c[0] as f32 + c[1] as f32) * (0.5 * NORM)),
                             );
                         }
-                        _ => {}
+                        _ => {
+                            let ch = channels as usize;
+                            let _ =
+                                prod.push_iter(data.chunks_exact(ch).map(|c| c[0] as f32 * NORM));
+                        }
                     }
                 },
                 err_fn,
@@ -323,7 +334,11 @@ impl<T: DspCallBack + Clone> AudioEngine<T> {
                                     .map(|c| (c[0] as f32 + c[1] as f32) * (0.5 * NORM)),
                             );
                         }
-                        _ => {}
+                        _ => {
+                            let ch = channels as usize;
+                            let _ =
+                                prod.push_iter(data.chunks_exact(ch).map(|c| c[0] as f32 * NORM));
+                        }
                     }
                 },
                 err_fn,
@@ -339,11 +354,12 @@ impl<T: DspCallBack + Clone> AudioEngine<T> {
         Ok((stream, config, cons))
     }
 
-    pub fn reset(&mut self) {
+    pub fn reset(&mut self, feature_extractor: T) {
         self.signal_tx = None;
         self.is_playing.store(false, Ordering::Relaxed);
         self.thread_error = Arc::new(Mutex::new(None));
         self.supervisor_handle = None;
+        self.feature_extractor = Some(feature_extractor);
     }
 
     pub fn pause(&mut self) -> Result<(), Box<dyn Error>> {
@@ -376,7 +392,7 @@ impl<T: DspCallBack + Clone> AudioEngine<T> {
     }
 }
 
-impl<T: DspCallBack + Clone> Drop for AudioEngine<T> {
+impl<T: DspCallBack> Drop for AudioEngine<T> {
     fn drop(&mut self) {
         self.end()
     }

@@ -96,7 +96,7 @@ impl BandPassFilter {
     }
 
     #[inline(always)]
-    pub fn process_frames(&mut self, frames: [f32; FRAME_SIZE]) -> [f32; FRAME_SIZE] {
+    pub fn process_frames(&mut self, frames: &[f32]) -> [f32; FRAME_SIZE] {
         let mut output = [0.0; FRAME_SIZE];
         for i in 0..frames.len() {
             let y = self.lbf.b0 * frames[i] + self.lbf.s1;

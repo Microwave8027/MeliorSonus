@@ -1,13 +1,70 @@
-#[derive(Clone)]
+use std::time::{Duration, Instant};
+
+#[derive(Clone, Debug, PartialEq)]
 pub struct Note {
-    pitch: Pitch,
-    octave: Octave,
-    tonality_offset: i8, // meant to check for cent sharpness
-    loudness_dbfs: f32,
+    pub pitch: Pitch,
+    pub octave: Octave,
+    pub tonality_offset: i8, // meant to check for cent sharpness
+    pub loudness_dbfs: f32,
+    pub rise_duration: f32,
+    pub note_duration: f32,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
+pub struct RecordNote {
+    pub pitch: Pitch,
+    pub octave: Octave,
+    pub tonality_offset: i8,
+    pub peak_dbfs: f32,
+    pub beginning: Instant,
+    pub rise_time: Option<Duration>,
+}
+
+impl RecordNote {
+    pub fn new(pitch: Pitch, octave: Octave, tonality_offset: i8, peak_dbfs: f32) -> Self {
+        Self {
+            pitch,
+            octave,
+            tonality_offset,
+            peak_dbfs,
+            beginning: Instant::now(),
+            rise_time: None,
+        }
+    }
+
+    pub fn record_rise_time(&mut self) {
+        if self.rise_time.is_none() {
+            self.rise_time = Some(self.beginning.elapsed());
+        }
+    }
+
+    pub fn total_active_duration(&self) -> Duration {
+        self.beginning.elapsed()
+    }
+
+    pub fn add_peak_dbfs(&mut self, dbfs: f32) {
+        if dbfs > self.peak_dbfs {
+            self.peak_dbfs = dbfs;
+        }
+    }
+
+    pub fn into_note(self) -> Note {
+        let total_duration = self.total_active_duration();
+        let rise_duration = self.rise_time.unwrap_or(total_duration);
+        Note {
+            pitch: self.pitch,
+            octave: self.octave,
+            tonality_offset: self.tonality_offset,
+            loudness_dbfs: self.peak_dbfs,
+            rise_duration: rise_duration.as_secs_f32(),
+            note_duration: total_duration.as_secs_f32(),
+        }
+    }
+}
+
+#[derive(PartialEq, Eq, Hash, Clone, Copy, Debug)]
 pub enum Pitch {
+    None,
     C,
     CsDf,
     D,
@@ -22,10 +79,10 @@ pub enum Pitch {
     B,
 }
 
-#[allow(non_camel_case_types)]
-#[derive(Clone)]
+#[derive(PartialEq, Eq, Hash, Clone, Copy, Debug)]
 pub enum Octave {
     OutOfRange,
+    #[allow(non_camel_case_types)]
     O_1,
     O0,
     O1,
@@ -40,28 +97,30 @@ pub enum Octave {
     O10,
 }
 
-impl Note {
-    pub fn get_note(sampling_rate: u32, tau: f32, dbfs: f32) -> Option<Note> {
-        if tau == 0.0 {
-            return None;
-        }
-
-        let frequency = sampling_rate as f32 / tau;
-        let n = 69.0 + 12.0 * ((frequency / 440.0).log2());
-        let octave = Octave::midi_to_note(n.round() as u8);
-        let pitch = Pitch::get_pitch(n.round() as u8);
-        let tonality_offset = ((n - n.round()) * 100.0).round() as i8;
-        Some(Note {
-            pitch,
-            octave,
-            tonality_offset,
-            loudness_dbfs: dbfs,
-        })
+pub fn get_note(frequency: f32) -> Option<(Pitch, Octave, i8)> {
+    if frequency <= 0.0 || frequency.is_nan() || frequency.is_infinite() {
+        return None;
     }
+
+    let n = 69.0 + 12.0 * ((frequency / 440.0).log2());
+    if !(0.0..=127.0).contains(&n) {
+        return None;
+    }
+
+    let midi = n.round() as u8;
+    let octave = Octave::midi_to_note(midi);
+    let pitch = Pitch::get_pitch(midi);
+
+    if octave == Octave::OutOfRange || pitch == Pitch::None {
+        return None;
+    }
+
+    let tonality_offset = ((n - n.round()) * 100.0).round() as i8;
+    Some((pitch, octave, tonality_offset))
 }
 
 impl Octave {
-    fn midi_to_note(n: u8) -> Octave {
+    pub fn midi_to_note(n: u8) -> Octave {
         match n / 12 {
             0 => Octave::O_1,
             1 => Octave::O0,
@@ -75,13 +134,13 @@ impl Octave {
             9 => Octave::O8,
             10 => Octave::O9,
             11 => Octave::O10,
-            _ => Octave::OutOfRange, // technically should be filtered out
+            _ => Octave::OutOfRange,
         }
     }
 }
 
 impl Pitch {
-    fn get_pitch(n: u8) -> Pitch {
+    pub fn get_pitch(n: u8) -> Pitch {
         match n % 12 {
             0 => Pitch::C,
             1 => Pitch::CsDf,
@@ -95,7 +154,7 @@ impl Pitch {
             9 => Pitch::A,
             10 => Pitch::AsBf,
             11 => Pitch::B,
-            _ => Pitch::C, // never reachable, doesnt matter
+            _ => Pitch::None,
         }
     }
 }

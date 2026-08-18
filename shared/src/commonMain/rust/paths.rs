@@ -4,7 +4,7 @@ pub mod card;
 #[path = "audio_processing/cpal/cpal.rs"]
 pub mod audio_engine;
 
-#[path = "noise_filter/dsp.rs"]
+#[path = "audio_processing/dsp.rs"]
 pub mod dsp;
 
 #[path = "utils/errors.rs"]
@@ -19,14 +19,24 @@ pub mod instruments;
 #[path = "audio_processing/instruments/notes.rs"]
 pub mod notes;
 
-#[path = "noise_filter/processing/functions/mpm.rs"]
+#[path = "audio_processing/processing/functions/mpm.rs"]
 pub mod mpm;
 
-#[path = "noise_filter/processing/feature_extraction/high_pass_filter.rs"]
+#[path = "audio_processing/processing/functions/nsdf.rs"]
+pub mod nsdf;
+
+#[path = "audio_processing/processing/functions/high_pass_filter.rs"]
 pub mod high_pass_filter;
 
-#[path = "noise_filter/processing/feature_extraction/feature_extractor.rs"]
+#[path = "audio_processing/processing/feature_extraction/feature_extractor.rs"]
 pub mod feature_extractor;
 
-#[path = "noise_filter/processing/functions/rms_dbfs.rs"]
+#[path = "audio_processing/processing/feature_extraction/polyphonic_feature_extractor.rs"]
+pub mod polyphonic_feature_extractor;
+
+#[path = "audio_processing/processing/functions/rms_dbfs.rs"]
 pub mod rms_dbfs;
+
+#[cfg(test)]
+#[path = "tests/dsp_tests/mod.rs"]
+pub mod dsp_tests;
