@@ -28,7 +28,9 @@ Raw Floats (&[f32])
 * The entire workflow is done on one threadw(its cpu bound)
 */
 
-use crate::{high_pass_filter::BandPassFilter, instruments::Instrument, mpm::MPM, prelude::*};
+use crate::{
+    constants::*, high_pass_filter::BandPassFilter, instruments::Instrument, mpm::MPM, prelude::*,
+};
 
 pub struct CallBackParameters<'a> {
     pub buffer: &'a [f32; FRAME_SIZE],

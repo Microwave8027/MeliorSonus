@@ -15,6 +15,7 @@
 ** currently none
 */
 
+use crate::constants::*;
 use crate::high_pass_filter::BandPassFilter;
 use crate::instruments::Instrument;
 use crate::mpm::MPM;
@@ -24,10 +25,6 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use ringbuf::{HeapCons, HeapRb, traits::*};
 use std::sync::mpsc::{self, TryRecvError};
 use std::time::Duration;
-
-pub const RINGBUF_CAPACITY: usize = 16384;
-pub const PREFERRED_RATES: [u32; 2] = [44100, 48000];
-pub const HOP_SIZE: usize = FRAME_SIZE / 2;
 
 pub struct AudioEngine<T: DspCallBack> {
     signal_tx: Option<mpsc::Sender<EngineSignal>>,

@@ -1,4 +1,4 @@
-use crate::prelude::*;
+use crate::constants::*;
 
 /// Standalone zero-allocation Normalized Square Difference Function (NSDF) evaluator.
 ///
