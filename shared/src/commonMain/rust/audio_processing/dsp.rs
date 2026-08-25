@@ -53,15 +53,17 @@ pub trait DspCallBack: Send + 'static {
     }
 }
 
-pub struct Dsp {
+#[allow(dead_code)]
+pub struct Dsp<T: ErrorCallback> {
     instrument: Instrument,
     silence_threshold: f32,
     rb_cons: Option<HeapCons<Note>>,
+    error_callback: Arc<T>,
     pub audio_engine: AudioEngine<DspFeatureExtractor, T>,
 }
 
-impl Dsp {
-    pub fn new(instrument: Instrument, silence_threshold: f32) -> Self {
+impl<T: ErrorCallback> Dsp<T> {
+    pub fn new(instrument: Instrument, silence_threshold: f32, error_callback: T) -> Self {
         let rb = HeapRb::<Note>::new(NOTE_RINGBUF_CAPACITY);
         let (prod, cons) = rb.split();
         let feature_extractor = DspFeatureExtractor::new(
@@ -70,12 +72,15 @@ impl Dsp {
             PolyphonicFeatureExtractorImpl::new(),
             silence_threshold,
         );
-        let audio_engine = AudioEngine::new(instrument, feature_extractor);
+        let arc_err_callback = Arc::new(error_callback);
+        let audio_engine =
+            AudioEngine::new(instrument, feature_extractor, Arc::clone(&arc_err_callback));
 
         Self {
             instrument,
             silence_threshold,
             rb_cons: Some(cons),
+            error_callback: arc_err_callback,
             audio_engine,
         }
     }
