@@ -15,12 +15,11 @@ pub struct Card {
 }
 
 #[uniffi::export]
-pub fn test() -> Card{
-   let card = Card {
+pub fn test() -> Card {
+   Card {
       title: "test".to_string(),
       value: "100%".to_string(),
       description: "test".to_string(),
       card_type: CardType::IMPORTANT,
-   };
-   card
+   }
 }

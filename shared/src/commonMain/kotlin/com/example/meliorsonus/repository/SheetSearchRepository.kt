@@ -37,6 +37,7 @@ class SheetSearchRepositoryImpl(
             val buffer = ByteArray(8 * 1024)
             while (!response.isClosedForRead) {
                 val bytesRead = response.readAvailable(buffer, 0, buffer.size)
+                if (bytesRead < 0) break
                 if (bytesRead > 0) {
                     sink.write(buffer, 0, bytesRead)
                 }

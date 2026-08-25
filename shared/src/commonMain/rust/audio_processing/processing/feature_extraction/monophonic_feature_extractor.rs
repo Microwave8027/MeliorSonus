@@ -24,12 +24,11 @@
 * the crnn will go to sleep if a algorithm decides its not that complicated.
  */
 use crate::constants::*;
-use crate::high_pass_filter::BandPassFilter;
 use crate::instruments::Instrument;
 use crate::mpm::MPM;
 use crate::notes::*;
 use crate::prelude::*;
-use crate::processor::{track_note_state, NoteEnvelopeState};
+use crate::processor::{NoteEnvelopeState, track_note_state};
 use crate::rms_dbfs::*;
 
 pub type FeatureExtractorState = NoteEnvelopeState;
@@ -57,29 +56,38 @@ impl NoteFeatureExtractorImpl {
         self.active_note.as_ref()
     }
 
-    pub fn finalize_note(&mut self, time_stamp: u128) -> Option<(Note, u128)> {
-        self.active_note.take().map(|active| (active.into_note(), time_stamp))
+    pub fn finalize_note(&mut self) -> Option<Note> {
+        self.active_note.take().map(|active| active.into_note())
     }
 
-    pub fn reset(&mut self, time_stamp: u128) -> Option<(Note, u128)> {
-        let finalized = self.finalize_note(time_stamp);
+    pub fn reset(&mut self) -> Option<Note> {
+        let finalized = self.finalize_note();
         self.state = FeatureExtractorState::Idle;
         self.active_note = None;
         finalized
     }
 
+    pub fn take_active_note(&mut self) -> Option<(RecordNote, FeatureExtractorState)> {
+        let state = self.state;
+        self.state = FeatureExtractorState::Idle;
+        self.active_note.take().map(|record| (record, state))
+    }
+
+    pub fn adopt_note(&mut self, note: RecordNote, state: FeatureExtractorState) {
+        self.active_note = Some(note);
+        self.state = state;
+    }
+
     pub fn processing_single_note(
         &mut self,
-        buffer: &[f32; FRAME_SIZE],
+        filtered_frame: &[f32; FRAME_SIZE],
         cfg: &StreamConfig,
-        filter: &mut BandPassFilter,
         instrument: &Instrument,
         mpm: &mut MPM,
         time_stamp: u128,
-    ) -> Option<(Note, u128)> {
-        let filtered_frame = filter.process_frames(buffer);
+    ) -> Option<Note> {
         let dbfs = loudness(filtered_frame.as_slice());
-        let frequency = mpm.mpm(&filtered_frame, cfg, instrument);
+        let frequency = mpm.mpm(filtered_frame, cfg, instrument);
 
         let detected = if dbfs >= self.thresh_hold {
             get_note(frequency)
@@ -93,9 +101,9 @@ impl NoteFeatureExtractorImpl {
             detected,
             dbfs,
             time_stamp,
+            |_| {}, // additional functions when needed
+            |_, _| {},
             |_| {},
-            |_, _| {},
-            |_, _| {},
         )
     }
 }

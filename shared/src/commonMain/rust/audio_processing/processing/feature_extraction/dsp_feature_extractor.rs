@@ -13,7 +13,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 #[allow(non_camel_case_types)]
 pub struct dsp_feature_extractor {
-    pub note_rb: HeapProd<(Note, u128)>,
+    pub note_rb: HeapProd<Note>,
     pub single_note_extractor: NoteFeatureExtractorImpl,
     pub polyphonic_extractor: PolyphonicFeatureExtractorImpl,
     pub mode: PolyphonyMode,
@@ -26,7 +26,7 @@ pub type DspFeatureExtractor = dsp_feature_extractor;
 
 impl dsp_feature_extractor {
     pub fn new(
-        note_rb: HeapProd<(Note, u128)>,
+        note_rb: HeapProd<Note>,
         single_note_extractor: NoteFeatureExtractorImpl,
         polyphonic_extractor: PolyphonicFeatureExtractorImpl,
         silence_threshold_dbfs: f32,
@@ -71,14 +71,18 @@ impl DspCallBack for dsp_feature_extractor {
             for i in 0..MAX_POLYPHONY {
                 if let Some(active) = self.polyphonic_extractor.poly_active_notes[i].take() {
                     self.polyphonic_extractor.poly_note_states[i] = PolyphonicNoteState::Idle;
-                    let _ = self.note_rb.try_push((active.into_note(), timestamp));
+                    let note = active.into_note();
+                    let _ = self.note_rb.try_push(note);
                 }
             }
 
-            if let Some(note) = self
-                .single_note_extractor
-                .processing_single_note(buffer, cfg, filter, instrument, mpm, timestamp)
-            {
+            if let Some(note) = self.single_note_extractor.processing_single_note(
+                &filtered_frame,
+                cfg,
+                instrument,
+                mpm,
+                timestamp,
+            ) {
                 let _ = self.note_rb.try_push(note);
             }
 
@@ -93,6 +97,8 @@ impl DspCallBack for dsp_feature_extractor {
         let monophonic_threshold = mpm_cfg.clarity_threshold;
         let is_monophonic = clarity >= monophonic_threshold && peak_ratio <= 0.55;
 
+        let prev_mode = self.mode;
+
         if is_monophonic {
             if self.mode == PolyphonyMode::Silence || self.hangover_counter == 0 {
                 self.mode = PolyphonyMode::SingleNoteFastPath;
@@ -106,22 +112,49 @@ impl DspCallBack for dsp_feature_extractor {
             self.hangover_counter = HANGOVER_FRAMES_DEFAULT;
         }
 
+        // Migrate active notes across mode transitions to preserve note continuity
+        match (prev_mode, self.mode) {
+            (PolyphonyMode::SingleNoteFastPath, PolyphonyMode::PolyphonicCrnnPath)
+            | (PolyphonyMode::SingleNoteFastPath, PolyphonyMode::PolyphonicHangover(_)) => {
+                if let Some((active, state)) = self.single_note_extractor.take_active_note() {
+                    self.polyphonic_extractor.adopt_note(active, state);
+                }
+            }
+
+            (PolyphonyMode::PolyphonicCrnnPath, PolyphonyMode::SingleNoteFastPath)
+            | (PolyphonyMode::PolyphonicHangover(_), PolyphonyMode::SingleNoteFastPath) => {
+                if let Some((primary, state)) = self
+                    .polyphonic_extractor
+                    .take_primary_active_note_and_finalize_rest(|finalized| {
+                        let _ = self.note_rb.try_push(finalized);
+                    })
+                {
+                    self.single_note_extractor.adopt_note(primary, state);
+                }
+            }
+
+            _ => {}
+        }
+
         match self.mode {
             PolyphonyMode::Silence => {}
 
             PolyphonyMode::SingleNoteFastPath => {
                 // Delegate to MPM Fast Path (0 CRNN Overhead)
-                if let Some(note) = self
-                    .single_note_extractor
-                    .processing_single_note(buffer, cfg, filter, instrument, mpm, timestamp)
-                {
+                if let Some(note) = self.single_note_extractor.processing_single_note(
+                    &filtered_frame,
+                    cfg,
+                    instrument,
+                    mpm,
+                    timestamp,
+                ) {
                     let _ = self.note_rb.try_push(note);
                 }
             }
 
             PolyphonyMode::PolyphonicCrnnPath | PolyphonyMode::PolyphonicHangover(_) => {
                 // Route to Polyphonic CRNN + Harmonic Sieve
-                if let Some(note) = self.polyphonic_extractor.process_polyphonic_path(
+                for note in self.polyphonic_extractor.process_polyphonic_path(
                     &filtered_frame,
                     cfg.sample_rate as f32,
                     timestamp,
@@ -133,4 +166,3 @@ impl DspCallBack for dsp_feature_extractor {
         }
     }
 }
-

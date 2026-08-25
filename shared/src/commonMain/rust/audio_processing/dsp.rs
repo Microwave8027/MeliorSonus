@@ -49,6 +49,71 @@ pub trait DspCallBack: Send + 'static {
             instrument: _,
             mpm: _,
         }: CallBackParameters,
-    ) -> () {
+    ) {
+    }
+}
+
+pub struct Dsp {
+    instrument: Instrument,
+    silence_threshold: f32,
+    rb_cons: Option<HeapCons<Note>>,
+    pub audio_engine: AudioEngine<DspFeatureExtractor, T>,
+}
+
+impl Dsp {
+    pub fn new(instrument: Instrument, silence_threshold: f32) -> Self {
+        let rb = HeapRb::<Note>::new(NOTE_RINGBUF_CAPACITY);
+        let (prod, cons) = rb.split();
+        let feature_extractor = DspFeatureExtractor::new(
+            prod,
+            NoteFeatureExtractorImpl::new(silence_threshold),
+            PolyphonicFeatureExtractorImpl::new(),
+            silence_threshold,
+        );
+        let audio_engine = AudioEngine::new(instrument, feature_extractor);
+
+        Self {
+            instrument,
+            silence_threshold,
+            rb_cons: Some(cons),
+            audio_engine,
+        }
+    }
+
+    pub fn start(&mut self) -> Result<(), Box<dyn Error>> {
+        self.audio_engine.play()?;
+        Ok(())
+    }
+
+    pub fn reset(&mut self) {
+        let fe = self.create_new_feature_extractor();
+        self.audio_engine.reset(fe);
+    }
+
+    fn create_new_feature_extractor(&mut self) -> DspFeatureExtractor {
+        let rb = HeapRb::new(NOTE_RINGBUF_CAPACITY);
+        let (prod, cons) = rb.split();
+        self.rb_cons = Some(cons);
+
+        DspFeatureExtractor::new(
+            prod,
+            NoteFeatureExtractorImpl::new(self.silence_threshold),
+            PolyphonicFeatureExtractorImpl::new(),
+            self.silence_threshold,
+        )
+    }
+
+    pub fn pause(&mut self) -> Result<(), Box<dyn Error>> {
+        self.audio_engine.pause()?;
+        Ok(())
+    }
+
+    pub fn resume(&mut self) -> Result<(), Box<dyn Error>> {
+        self.audio_engine.resume()?;
+        Ok(())
+    }
+
+    pub fn stop(mut self) {
+        self.audio_engine.end();
     }
 }

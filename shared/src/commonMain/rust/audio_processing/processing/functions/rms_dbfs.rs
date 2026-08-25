@@ -11,12 +11,13 @@
 * below -40 is practically silence, but additional calibration may be added where the threshold is represented as a const or static
 */
 pub fn loudness(raw_bytes: &[f32]) -> f32 {
+    if raw_bytes.is_empty() {
+        return -180.0;
+    }
     let mut rms = 0.0f32;
     for byte in raw_bytes.iter() {
         rms += byte.powi(2);
     }
     rms /= raw_bytes.len() as f32;
-    let dbfs = 20.0 * (rms.powf(0.5) + 1e-9).log10();
-
-    dbfs
+    20.0 * (rms.powf(0.5) + 1e-9).log10()
 }

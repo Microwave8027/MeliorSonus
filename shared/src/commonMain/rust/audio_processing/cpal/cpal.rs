@@ -26,10 +26,10 @@ use ringbuf::{HeapCons, HeapRb, traits::*};
 use std::sync::mpsc::{self, TryRecvError};
 use std::time::Duration;
 
-pub struct AudioEngine<T: DspCallBack> {
+pub struct AudioEngine<T: DspCallBack, R: ErrorCallback> {
     signal_tx: Option<mpsc::Sender<EngineSignal>>,
     pub is_playing: Arc<AtomicBool>,
-    pub thread_error: Arc<Mutex<Option<ThreadError>>>,
+    error_callback: Arc<R>,
     supervisor_handle: Option<thread::JoinHandle<()>>,
     instrument: Arc<Instrument>,
     feature_extractor: Option<T>,
@@ -42,17 +42,12 @@ enum EngineSignal {
     Error { message: String }, // This type of error is always retryable
 }
 
-pub enum ThreadError {
-    StreamBuildError(String),
-    BufferOverfill,
-}
-
-impl<T: DspCallBack> AudioEngine<T> {
-    pub fn new(instrument: Instrument, feature_extractor: T) -> Self {
+impl<T: DspCallBack, R: ErrorCallback> AudioEngine<T, R> {
+    pub fn new(instrument: Instrument, feature_extractor: T, error_callback: Arc<R>) -> Self {
         AudioEngine {
             signal_tx: None,
             is_playing: Arc::new(AtomicBool::new(false)),
-            thread_error: Arc::new(Mutex::new(None)),
+            error_callback: error_callback,
             supervisor_handle: None,
             instrument: Arc::new(instrument),
             feature_extractor: Some(feature_extractor),
@@ -60,20 +55,17 @@ impl<T: DspCallBack> AudioEngine<T> {
     }
 
     pub fn play(&mut self) -> Result<(), Box<dyn Error>> {
-        if self.thread_error.lock().unwrap().is_some() || self.is_playing.load(Ordering::Relaxed) {
-            return Err(format!("Reset Audio Engine and read errors before playing again").into());
+        if self.is_playing.load(Ordering::Relaxed) || self.feature_extractor.is_none() {
+            return Err("Reset Audio Engine and read errors before playing again".into());
         }
         // Checks if the thread is already running
-        if let Some(ref handle) = self.supervisor_handle {
-            if !handle.is_finished() {
-                return Err("Audio engine is already playing".into());
-            }
+        if self
+            .supervisor_handle
+            .as_ref()
+            .is_some_and(|h| !h.is_finished())
+        {
+            return Err("Audio engine is already playing".into());
         }
-
-        let mut feature_extractor = self
-            .feature_extractor
-            .take()
-            .expect("Feature extractor should be present");
 
         let (tx, rx) = mpsc::channel();
         // Build initial stream. If this fails, return Err immediately to caller
@@ -84,24 +76,67 @@ impl<T: DspCallBack> AudioEngine<T> {
         self.signal_tx = Some(tx.clone());
         self.is_playing.store(true, Ordering::Relaxed);
         let is_playing = Arc::clone(&self.is_playing); // Acts as a drop guard, notifys when dropped
-        let thread_error = Arc::clone(&self.thread_error);
+        let error_callback = Arc::clone(&self.error_callback);
+
+        let mut feature_extractor = self
+            .feature_extractor
+            .take()
+            .expect("Feature extractor should be present");
 
         let handle = thread::spawn(move || {
             let _guard = DropGuard::from(is_playing);
             let mut stream: Option<Stream> = Some(initial_stream);
+            let mut is_paused = false;
 
             // Singletons bound to the stream
-            let mut config: Option<StreamConfig> = Some(initial_config.clone());
+            let mut config: Option<StreamConfig> = Some(initial_config);
             let mut frame = [0.0f32; FRAME_SIZE];
             let mut irr_filter_inst: Option<BandPassFilter> = Some(BandPassFilter::new(
                 insturment.filter_range().hpf_cutoff_hz,
                 insturment.filter_range().harmonic_ceiling_hz,
-                initial_config.sample_rate as u32,
+                initial_config.sample_rate,
             ));
             let mut c: Option<HeapCons<f32>> = Some(consumer);
             let mut mpm: Option<MPM> = Some(MPM::new(FRAME_SIZE / 2));
 
             'supervisor: loop {
+                // Drain and handle all pending engine control signals
+                loop {
+                    match rx.try_recv() {
+                        Ok(msg) => match msg {
+                            EngineSignal::Closed => break 'supervisor,
+                            EngineSignal::Error { message } => {
+                                log::error!("Stream error: {}", message);
+                                stream = None;
+                                config = None;
+                                c = None;
+                                thread::sleep(Duration::from_millis(300)); // Debounce before reconnecting
+                                continue 'supervisor;
+                            }
+                            EngineSignal::Paused => {
+                                is_paused = true;
+                                if let Some(ref s) = stream {
+                                    let _ = s.pause();
+                                }
+                            }
+                            EngineSignal::Playing => {
+                                is_paused = false;
+                                if let Some(ref s) = stream {
+                                    let _ = s.play();
+                                }
+                            }
+                        },
+                        Err(TryRecvError::Disconnected) => break 'supervisor,
+                        Err(TryRecvError::Empty) => break,
+                    }
+                }
+
+                // If paused, sleep briefly and loop to wait for resume or close
+                if is_paused {
+                    thread::sleep(Duration::from_millis(10));
+                    continue 'supervisor;
+                }
+
                 // Rebuilds the stream if it was destroyed by a runtime error
                 if stream.is_none() {
                     match Self::build_stream(&tx) {
@@ -109,62 +144,21 @@ impl<T: DspCallBack> AudioEngine<T> {
                             irr_filter_inst = Some(BandPassFilter::new(
                                 insturment.filter_range().hpf_cutoff_hz,
                                 insturment.filter_range().harmonic_ceiling_hz,
-                                cf.sample_rate as u32,
+                                cf.sample_rate,
                             ));
                             config = Some(cf);
                             stream = Some(st);
                             c = Some(cons);
-                            mpm = Some(MPM::new(FRAME_SIZE / 2))
+                            mpm = Some(MPM::new(FRAME_SIZE / 2));
                         }
                         Err(e) => {
                             log::error!("Stream build failed: {}", e);
-                            *thread_error.lock().unwrap() =
-                                Some(ThreadError::StreamBuildError(e.to_string()));
+                            error_callback.on_error(RustError::StreamBuildError(e.to_string()));
                             break 'supervisor;
                         }
                     }
                 }
 
-                // Checks if the supervisor should reopen due to mic change
-                match rx.try_recv() {
-                    Ok(msg) => match msg {
-                        EngineSignal::Closed => break 'supervisor,
-                        EngineSignal::Error { message, .. } => {
-                            // Retry is ignored because its simply a holder for info
-                            log::error!("Stream error: {}", message);
-                            stream = None;
-                            config = None;
-                            c = None;
-                            thread::sleep(Duration::from_millis(300)); // Debounce before reconnecting
-                            continue 'supervisor;
-                        }
-                        EngineSignal::Paused => {
-                            // Stops hardware
-                            if let Some(ref s) = stream {
-                                let _ = s.pause();
-                            }
-                            while let Ok(msg) = rx.recv() {
-                                if matches!(msg, EngineSignal::Playing) {
-                                    if let Some(ref s) = stream {
-                                        let _ = s.play();
-                                    }
-                                    break;
-                                } else if matches!(msg, EngineSignal::Closed) {
-                                    break 'supervisor;
-                                } else if matches!(msg, EngineSignal::Error { .. }) {
-                                    stream = None;
-                                    config = None;
-                                    c = None;
-                                }
-                            }
-                        }
-                        _ => {}
-                    },
-                    Err(e) => match e {
-                        TryRecvError::Disconnected => break 'supervisor,
-                        TryRecvError::Empty => {}
-                    },
-                }
                 // DSP part
                 if let (Some(_), Some(cfg), Some(cons)) = (&stream, &config, &mut c) {
                     let mut processed = false;
@@ -173,7 +167,7 @@ impl<T: DspCallBack> AudioEngine<T> {
                     if cons.occupied_len() >= NEAR_BUFFER_OVERFILL {
                         let excess = cons.occupied_len() - FRAME_SIZE;
                         cons.skip(excess);
-                        *thread_error.lock().unwrap() = Some(ThreadError::BufferOverfill);
+                        error_callback.on_error(RustError::BufferOverfill);
                         break 'supervisor;
                     }
 
@@ -352,9 +346,9 @@ impl<T: DspCallBack> AudioEngine<T> {
     }
 
     pub fn reset(&mut self, feature_extractor: T) {
+        self.end();
         self.signal_tx = None;
         self.is_playing.store(false, Ordering::Relaxed);
-        self.thread_error = Arc::new(Mutex::new(None));
         self.supervisor_handle = None;
         self.feature_extractor = Some(feature_extractor);
     }
@@ -365,7 +359,7 @@ impl<T: DspCallBack> AudioEngine<T> {
             tx.send(EngineSignal::Paused)?;
             Ok(())
         } else {
-            Err(format!("Audio not initialized").into())
+            Err("Audio not initialized".into())
         }
     }
 
@@ -375,7 +369,7 @@ impl<T: DspCallBack> AudioEngine<T> {
             tx.send(EngineSignal::Playing)?;
             Ok(())
         } else {
-            Err(format!("Audio not initialized").into())
+            Err("Audio not initialized".into())
         }
     }
 
@@ -389,7 +383,7 @@ impl<T: DspCallBack> AudioEngine<T> {
     }
 }
 
-impl<T: DspCallBack> Drop for AudioEngine<T> {
+impl<T: DspCallBack, R: ErrorCallback> Drop for AudioEngine<T, R> {
     fn drop(&mut self) {
         self.end()
     }

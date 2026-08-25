@@ -45,10 +45,10 @@ impl BandPassFilter {
         };
         let high = Self::update_coefficients(high, sample_rate, high_pass_filter);
         let low = Self::update_coefficients(low, sample_rate, low_pass_filter);
-        return BandPassFilter {
+        BandPassFilter {
             hbf: high,
             lbf: low,
-        };
+        }
     }
 
     fn update_coefficients(
@@ -83,7 +83,7 @@ impl BandPassFilter {
         };
 
         let inv = 1.0 / (1.0 + alpha);
-        return BiquadFilter {
+        BiquadFilter {
             filter_type: filter_type.filter_type,
             a1: a1 * inv,
             a2: a2 * inv,
@@ -92,11 +92,11 @@ impl BandPassFilter {
             b2: b2 * inv,
             s1: 0.0,
             s2: 0.0,
-        };
+        }
     }
 
     #[inline(always)]
-    pub fn process_frames(&mut self, frames: &[f32]) -> [f32; FRAME_SIZE] {
+    pub fn process_frames(&mut self, frames: &[f32; FRAME_SIZE]) -> [f32; FRAME_SIZE] {
         let mut output = [0.0; FRAME_SIZE];
         for i in 0..frames.len() {
             let y = self.lbf.b0 * frames[i] + self.lbf.s1;
@@ -108,6 +108,6 @@ impl BandPassFilter {
             self.hbf.s2 = self.hbf.b2 * y - self.hbf.a2 * z;
             output[i] = z;
         }
-        return output;
+        output
     }
 }

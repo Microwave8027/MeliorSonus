@@ -13,6 +13,12 @@ impl DropGuard {
     }
 }
 
+impl Default for DropGuard {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl Drop for DropGuard {
     fn drop(&mut self) {
         self.0.store(false, Ordering::SeqCst);

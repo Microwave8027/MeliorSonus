@@ -15,9 +15,10 @@ pub enum NoteEnvelopeState {
 }
 
 /// Stateless note tracking processor that mutates borrowed note state and active note.
-///
-/// Implements envelope transitions (Idle -> Rise -> Peak -> Decay -> Finalize)
+/// Peak is currently deprecated and not used
+/// Implements envelope transitions (Idle -> Rise -> Decay -> Finalize)
 /// while allowing monophonic and polyphonic pipelines to customize behavior via closures.
+#[allow(clippy::too_many_arguments)]
 pub fn track_note_state<FStart, FUpdate, FFinalize>(
     state: &mut NoteEnvelopeState,
     active_note: &mut Option<RecordNote>,
@@ -27,22 +28,22 @@ pub fn track_note_state<FStart, FUpdate, FFinalize>(
     mut on_start: FStart,
     mut on_update: FUpdate,
     mut on_finalize: FFinalize,
-) -> Option<(Note, u128)>
+) -> Option<Note>
 where
     FStart: FnMut(&mut RecordNote),
     FUpdate: FnMut(&mut RecordNote, NoteEnvelopeState),
-    FFinalize: FnMut(&Note, u128),
+    FFinalize: FnMut(&Note),
 {
     let mut finalized = |note: &mut Option<RecordNote>| {
         note.take().map(|note| {
             let note = note.into_note();
-            on_finalize(&note, time_stamp);
-            (note, time_stamp)
+            on_finalize(&note);
+            note
         })
     };
-    match (*state, detected) {
+    let result = match (*state, detected) {
         (NoteEnvelopeState::Idle, Some((pitch, octave, tonality_offset))) => {
-            let mut record = RecordNote::new(pitch, octave, tonality_offset, dbfs);
+            let mut record = RecordNote::new(pitch, octave, tonality_offset, dbfs, time_stamp);
             on_start(&mut record);
             *active_note = Some(record);
             *state = NoteEnvelopeState::Rise;
@@ -64,14 +65,15 @@ where
                     None
                 } else {
                     let finalized = finalized(active_note);
-                    let mut record = RecordNote::new(pitch, octave, tonality_offset, dbfs);
+                    let mut record =
+                        RecordNote::new(pitch, octave, tonality_offset, dbfs, time_stamp);
                     on_start(&mut record);
                     *active_note = Some(record);
                     *state = NoteEnvelopeState::Rise;
                     finalized
                 }
             } else {
-                let mut record = RecordNote::new(pitch, octave, tonality_offset, dbfs);
+                let mut record = RecordNote::new(pitch, octave, tonality_offset, dbfs, time_stamp);
                 on_start(&mut record);
                 *active_note = Some(record);
                 *state = NoteEnvelopeState::Rise;
@@ -93,14 +95,15 @@ where
                     None
                 } else {
                     let finalized = finalized(active_note);
-                    let mut record = RecordNote::new(pitch, octave, tonality_offset, dbfs);
+                    let mut record =
+                        RecordNote::new(pitch, octave, tonality_offset, dbfs, time_stamp);
                     on_start(&mut record);
                     *active_note = Some(record);
                     *state = NoteEnvelopeState::Rise;
                     finalized
                 }
             } else {
-                let mut record = RecordNote::new(pitch, octave, tonality_offset, dbfs);
+                let mut record = RecordNote::new(pitch, octave, tonality_offset, dbfs, time_stamp);
                 on_start(&mut record);
                 *active_note = Some(record);
                 *state = NoteEnvelopeState::Rise;
@@ -108,30 +111,37 @@ where
             }
         }
         (NoteEnvelopeState::Peak, None) => {
-            let finalized = active_note.take().map(|active| {
-                let note = active.into_note();
-                on_finalize(&note, time_stamp);
-                (note, time_stamp)
-            });
+            let finalized = finalized(active_note);
             *state = NoteEnvelopeState::Idle;
             finalized
         }
         (NoteEnvelopeState::Decay, Some((pitch, octave, tonality_offset))) => {
             if let Some(active) = active_note {
                 if active.pitch == pitch && active.octave == octave {
-                    active.tonality_offset = tonality_offset;
-                    on_update(active, NoteEnvelopeState::Decay);
-                    None
+                    if dbfs > active.last_dbfs + 3.0 {
+                        let finalized = finalized(active_note);
+                        let mut record =
+                            RecordNote::new(pitch, octave, tonality_offset, dbfs, time_stamp);
+                        on_start(&mut record);
+                        *active_note = Some(record);
+                        *state = NoteEnvelopeState::Rise;
+                        finalized
+                    } else {
+                        active.tonality_offset = tonality_offset;
+                        on_update(active, NoteEnvelopeState::Decay);
+                        None
+                    }
                 } else {
                     let finalized = finalized(active_note);
-                    let mut record = RecordNote::new(pitch, octave, tonality_offset, dbfs);
+                    let mut record =
+                        RecordNote::new(pitch, octave, tonality_offset, dbfs, time_stamp);
                     on_start(&mut record);
                     *active_note = Some(record);
                     *state = NoteEnvelopeState::Rise;
                     finalized
                 }
             } else {
-                let mut record = RecordNote::new(pitch, octave, tonality_offset, dbfs);
+                let mut record = RecordNote::new(pitch, octave, tonality_offset, dbfs, time_stamp);
                 on_start(&mut record);
                 *active_note = Some(record);
                 *state = NoteEnvelopeState::Rise;
@@ -143,5 +153,11 @@ where
             *state = NoteEnvelopeState::Idle;
             finalized
         }
+    };
+
+    if let Some(active) = active_note {
+        active.last_dbfs = dbfs;
     }
+
+    result
 }

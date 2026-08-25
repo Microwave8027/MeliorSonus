@@ -8,6 +8,17 @@ pub struct Note {
     pub loudness_dbfs: f32,
     pub rise_duration: f32,
     pub note_duration: f32,
+    pub note_striked: u128,
+}
+
+impl Note {
+    pub fn update_note_striked(&mut self, timestamp: u128) {
+        self.note_striked = timestamp;
+    }
+}
+
+pub fn update_note_striked(note: &mut Note, timestamp: u128) {
+    note.update_note_striked(timestamp);
 }
 
 #[derive(Clone, Debug)]
@@ -16,19 +27,29 @@ pub struct RecordNote {
     pub octave: Octave,
     pub tonality_offset: i8,
     pub peak_dbfs: f32,
+    pub last_dbfs: f32,
     pub beginning: Instant,
     pub rise_time: Option<Duration>,
+    pub note_striked: u128,
 }
 
 impl RecordNote {
-    pub fn new(pitch: Pitch, octave: Octave, tonality_offset: i8, peak_dbfs: f32) -> Self {
+    pub fn new(
+        pitch: Pitch,
+        octave: Octave,
+        tonality_offset: i8,
+        peak_dbfs: f32,
+        note_striked: u128,
+    ) -> Self {
         Self {
             pitch,
             octave,
             tonality_offset,
             peak_dbfs,
+            last_dbfs: peak_dbfs,
             beginning: Instant::now(),
             rise_time: None,
+            note_striked,
         }
     }
 
@@ -48,6 +69,10 @@ impl RecordNote {
         }
     }
 
+    pub fn set_last_dbfs(&mut self, dbfs: f32) {
+        self.last_dbfs = dbfs;
+    }
+
     pub fn into_note(self) -> Note {
         let total_duration = self.total_active_duration();
         let rise_duration = self.rise_time.unwrap_or(total_duration);
@@ -58,6 +83,7 @@ impl RecordNote {
             loudness_dbfs: self.peak_dbfs,
             rise_duration: rise_duration.as_secs_f32(),
             note_duration: total_duration.as_secs_f32(),
+            note_striked: self.note_striked,
         }
     }
 }

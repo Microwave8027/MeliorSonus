@@ -16,6 +16,9 @@ pub mod guard;
 #[path = "utils/feature_extractor_state.rs"]
 pub mod processor;
 
+#[path = "utils/error_callback.rs"]
+pub mod error_callback;
+
 #[path = "audio_processing/instruments/instruments.rs"]
 pub mod instruments;
 

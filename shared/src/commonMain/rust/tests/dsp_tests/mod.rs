@@ -35,7 +35,6 @@ mod tests {
             sample_rate: 44100,
             buffer_size: cpal::BufferSize::Default,
         };
-        let mut filter = BandPassFilter::new(30.0, 10000.0, 44100);
         let instrument = Instrument::Generic;
         let mut mpm = MPM::new(FRAME_SIZE / 2);
 
@@ -49,7 +48,6 @@ mod tests {
         let opt1 = extractor.processing_single_note(
             &a4_attack,
             &cfg,
-            &mut filter,
             &instrument,
             &mut mpm,
             ts,
@@ -64,7 +62,6 @@ mod tests {
         let opt2 = extractor.processing_single_note(
             &a4_decay,
             &cfg,
-            &mut filter,
             &instrument,
             &mut mpm,
             ts + 10,
@@ -76,7 +73,6 @@ mod tests {
         let opt3 = extractor.processing_single_note(
             &silent_frame,
             &cfg,
-            &mut filter,
             &instrument,
             &mut mpm,
             ts + 20,
@@ -84,12 +80,12 @@ mod tests {
         assert_eq!(extractor.state(), FeatureExtractorState::Idle);
         assert!(extractor.active_note().is_none());
 
-        // Verify emitted (Note, timestamp)
-        let (emitted_note, timestamp) = opt3.expect("Should have returned emitted note");
+        // Verify emitted Note
+        let emitted_note = opt3.expect("Should have returned emitted note");
         assert_eq!(emitted_note.pitch, Pitch::A);
         assert_eq!(emitted_note.octave, Octave::O4);
         assert!(emitted_note.loudness_dbfs > -20.0);
-        assert_eq!(timestamp, ts + 20);
+        assert_eq!(emitted_note.note_striked, ts);
         assert!(emitted_note.note_duration >= 0.0);
         assert!(emitted_note.rise_duration >= 0.0);
     }
@@ -103,7 +99,6 @@ mod tests {
             sample_rate: 44100,
             buffer_size: cpal::BufferSize::Default,
         };
-        let mut filter = BandPassFilter::new(30.0, 10000.0, 44100);
         let instrument = Instrument::Generic;
         let mut mpm = MPM::new(FRAME_SIZE / 2);
 
@@ -117,7 +112,6 @@ mod tests {
         let opt1 = extractor.processing_single_note(
             &c4_frame,
             &cfg,
-            &mut filter,
             &instrument,
             &mut mpm,
             ts,
@@ -131,17 +125,16 @@ mod tests {
         let opt2 = extractor.processing_single_note(
             &d4_frame,
             &cfg,
-            &mut filter,
             &instrument,
             &mut mpm,
             ts + 10,
         );
 
         // First note (C4) should have been emitted
-        let (first_note, ts1) = opt2.expect("First note (C4) should be emitted");
+        let first_note = opt2.expect("First note (C4) should be emitted");
         assert_eq!(first_note.pitch, Pitch::C);
         assert_eq!(first_note.octave, Octave::O4);
-        assert_eq!(ts1, ts + 10);
+        assert_eq!(first_note.note_striked, ts);
 
         // Active note is now D4
         assert_eq!(extractor.active_note().unwrap().pitch, Pitch::D);
@@ -151,17 +144,16 @@ mod tests {
         let opt3 = extractor.processing_single_note(
             &silent_frame,
             &cfg,
-            &mut filter,
             &instrument,
             &mut mpm,
             ts + 20,
         );
         assert_eq!(extractor.state(), FeatureExtractorState::Idle);
 
-        let (second_note, ts2) = opt3.expect("Second note (D4) should be emitted");
+        let second_note = opt3.expect("Second note (D4) should be emitted");
         assert_eq!(second_note.pitch, Pitch::D);
         assert_eq!(second_note.octave, Octave::O4);
-        assert_eq!(ts2, ts + 20);
+        assert_eq!(second_note.note_striked, ts + 10);
     }
 
     #[test]
@@ -212,7 +204,7 @@ mod tests {
 
     #[test]
     fn test_dsp_feature_extractor_dynamic_mode_switching() {
-        let rb = HeapRb::<(Note, u128)>::new(16);
+        let rb = HeapRb::<Note>::new(16);
         let (prod, _cons) = rb.split();
 
         let single = NoteFeatureExtractorImpl::new(-40.0);
@@ -258,7 +250,192 @@ mod tests {
         assert_eq!(poly.poly_note_states[0], PolyphonicNoteState::Idle);
 
         let silent_frame = [0.0f32; FRAME_SIZE];
-        let note_opt = poly.process_polyphonic_path(&silent_frame, 44100.0, 1000, -30.0);
-        assert!(note_opt.is_none());
+        let notes = poly.process_polyphonic_path(&silent_frame, 44100.0, 1000, -30.0);
+        assert!(notes.is_empty());
+    }
+
+    #[test]
+    fn test_update_note_striked() {
+        let mut note = Note {
+            pitch: Pitch::C,
+            octave: Octave::O4,
+            tonality_offset: 0,
+            loudness_dbfs: -12.0,
+            rise_duration: 0.1,
+            note_duration: 0.5,
+            note_striked: 0,
+        };
+        note.update_note_striked(123456789);
+        assert_eq!(note.note_striked, 123456789);
+
+        update_note_striked(&mut note, 987654321);
+        assert_eq!(note.note_striked, 987654321);
+    }
+
+    #[test]
+    fn test_active_note_migration_mono_to_poly() {
+        let mut mono = NoteFeatureExtractorImpl::new(-40.0);
+        let mut poly = PolyphonicFeatureExtractorImpl::new();
+
+        let cfg = StreamConfig {
+            channels: 1,
+            sample_rate: 44100,
+            buffer_size: cpal::BufferSize::Default,
+        };
+        let instrument = Instrument::Generic;
+        let mut mpm = MPM::new(FRAME_SIZE / 2);
+        let a4_frame = make_tone_frame(440.0, 0.6, 44100);
+
+        // Start note in mono extractor
+        mono.processing_single_note(&a4_frame, &cfg, &instrument, &mut mpm, 1000);
+        assert!(mono.active_note().is_some());
+
+        // Migrate to poly
+        let (active, state) = mono.take_active_note().expect("Should have active note");
+        assert!(mono.active_note().is_none());
+        assert_eq!(active.note_striked, 1000);
+        poly.adopt_note(active, state);
+
+        assert!(poly.poly_active_notes[0].is_some());
+        assert_eq!(poly.poly_active_notes[0].as_ref().unwrap().pitch, Pitch::A);
+        assert_eq!(poly.poly_active_notes[0].as_ref().unwrap().octave, Octave::O4);
+        assert_eq!(poly.poly_active_notes[0].as_ref().unwrap().note_striked, 1000);
+    }
+
+    #[test]
+    fn test_active_note_migration_poly_to_mono() {
+        let mut mono = NoteFeatureExtractorImpl::new(-40.0);
+        let mut poly = PolyphonicFeatureExtractorImpl::new();
+
+        // Put 2 notes into poly with their onset timestamps
+        poly.poly_active_notes[0] = Some(RecordNote::new(Pitch::C, Octave::O4, 0, -20.0, 1000));
+        poly.poly_note_states[0] = PolyphonicNoteState::Decay;
+        poly.poly_active_notes[1] = Some(RecordNote::new(Pitch::E, Octave::O4, 0, -10.0, 1200)); // louder
+        poly.poly_note_states[1] = PolyphonicNoteState::Rise;
+
+        let mut finalized_notes = Vec::new();
+        let (primary, state) = poly
+            .take_primary_active_note_and_finalize_rest(|n| finalized_notes.push(n))
+            .expect("Should return primary note");
+
+        // Louder note (E4) should be chosen as primary, preserving its onset timestamp
+        assert_eq!(primary.pitch, Pitch::E);
+        assert_eq!(primary.note_striked, 1200);
+        assert_eq!(state, PolyphonicNoteState::Rise);
+
+        // Trailing note (C4) should be finalized with its original onset timestamp
+        assert_eq!(finalized_notes.len(), 1);
+        assert_eq!(finalized_notes[0].pitch, Pitch::C);
+        assert_eq!(finalized_notes[0].note_striked, 1000);
+
+        // Mono adopts primary
+        mono.adopt_note(primary, state);
+        assert!(mono.active_note().is_some());
+        assert_eq!(mono.active_note().unwrap().pitch, Pitch::E);
+        assert_eq!(mono.active_note().unwrap().note_striked, 1200);
+        assert_eq!(mono.state(), FeatureExtractorState::Rise);
+    }
+
+    #[test]
+    fn test_polyphonic_multi_note_simultaneous_finalization() {
+        let mut poly = PolyphonicFeatureExtractorImpl::new();
+
+        // Simulate 3 notes actively sounding in polyphonic extractor with onset timestamp 1000
+        poly.poly_active_notes[0] = Some(RecordNote::new(Pitch::C, Octave::O4, 0, -15.0, 1000));
+        poly.poly_note_states[0] = PolyphonicNoteState::Decay;
+        poly.poly_active_notes[1] = Some(RecordNote::new(Pitch::E, Octave::O4, 0, -14.0, 1000));
+        poly.poly_note_states[1] = PolyphonicNoteState::Decay;
+        poly.poly_active_notes[2] = Some(RecordNote::new(Pitch::G, Octave::O4, 0, -16.0, 1000));
+        poly.poly_note_states[2] = PolyphonicNoteState::Decay;
+
+        // Process a silent / inactive frame where probabilities drop below threshold (e.g. all 0.0) at timestamp 5000
+        let silent_frame = [0.0f32; FRAME_SIZE];
+        let finalized = poly.process_polyphonic_path(&silent_frame, 44100.0, 5000, -50.0);
+
+        // All 3 notes should be finalized simultaneously without being overwritten
+        assert_eq!(finalized.len(), 3, "All 3 chord notes must be finalized in the same frame");
+        let pitches: Vec<Pitch> = finalized.iter().map(|n| n.pitch).collect();
+        assert!(pitches.contains(&Pitch::C));
+        assert!(pitches.contains(&Pitch::E));
+        assert!(pitches.contains(&Pitch::G));
+
+        for note in &finalized {
+            // Note striked preserves original onset timestamp 1000
+            assert_eq!(note.note_striked, 1000);
+        }
+    }
+
+    #[test]
+    fn test_decay_restrike_detection_and_last_dbfs_update() {
+        let mut state = NoteEnvelopeState::Decay;
+        let mut active = Some(RecordNote::new(Pitch::A, Octave::O4, 0, -10.0, 1000));
+        active.as_mut().unwrap().last_dbfs = -20.0;
+
+        // 1. Same pitch, but slight decay from -20.0 -> -22.0 (no restrike)
+        let note1 = track_note_state(
+            &mut state,
+            &mut active,
+            Some((Pitch::A, Octave::O4, 0)),
+            -22.0,
+            1020,
+            |_| {},
+            |_, _| {},
+            |_| {},
+        );
+        assert!(note1.is_none());
+        assert_eq!(state, NoteEnvelopeState::Decay);
+        assert_eq!(active.as_ref().unwrap().last_dbfs, -22.0);
+
+        // 2. Restrike at 1050: amplitude jumps from -22.0 -> -15.0 (> 3dB jump)
+        let note2 = track_note_state(
+            &mut state,
+            &mut active,
+            Some((Pitch::A, Octave::O4, 0)),
+            -15.0,
+            1050,
+            |_| {},
+            |_, _| {},
+            |_| {},
+        );
+        // The previous note (onset at 1000) should be finalized
+        let finalized = note2.expect("Restrike must finalize the decayed note");
+        assert_eq!(finalized.pitch, Pitch::A);
+        assert_eq!(finalized.note_striked, 1000);
+
+        // A new note is started in Rise state with onset timestamp 1050
+        assert_eq!(state, NoteEnvelopeState::Rise);
+        assert!(active.is_some());
+        assert_eq!(active.as_ref().unwrap().note_striked, 1050);
+        assert_eq!(active.as_ref().unwrap().last_dbfs, -15.0);
+    }
+
+    #[test]
+    fn test_harmonic_sieve_masks_ghost_but_preserves_chord_notes() {
+        use crate::harmonic_sieve_mask::HarmonicSieveMasker;
+
+        let mut sieve = HarmonicSieveMasker::new(0.0002, 6);
+        let mut raw_probs = [0.0f32; PITCH_BINS];
+        let mut sieved_probs = [0.0f32; PITCH_BINS];
+
+        // Bin 36 is A3 (MIDI 57, 220 Hz), Bin 48 is A4 (MIDI 69, 440 Hz)
+        raw_probs[36] = 0.90; // Loud A3 fundamental
+
+        // 1. Ghost overtone: A4 has low leakage activation 0.35 -> should be masked to 0.0
+        raw_probs[48] = 0.35;
+        sieve.apply_sieve(&raw_probs, 44100.0, &mut sieved_probs);
+        assert_eq!(sieved_probs[36], 0.90);
+        assert_eq!(
+            sieved_probs[48], 0.0,
+            "Low-confidence overtone ghost must be masked to 0.0"
+        );
+
+        // 2. Genuine chord octave: A4 is intentionally played with high confidence 0.75 -> must be preserved!
+        raw_probs[48] = 0.75;
+        sieve.apply_sieve(&raw_probs, 44100.0, &mut sieved_probs);
+        assert_eq!(sieved_probs[36], 0.90);
+        assert_eq!(
+            sieved_probs[48], 0.75,
+            "High-confidence genuine chord note must NOT be zeroed by the harmonic sieve"
+        );
     }
 }

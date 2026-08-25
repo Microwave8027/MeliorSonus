@@ -11,6 +11,7 @@ android_logger = "0.13"
 hound = "3.5"
 ringbuf = "0.4"
 pitch-detection = "0.3"
+arrayvec = "0.7"
 
 [lib]
 crate-type = ["cdylib", "staticlib", "rlib"]

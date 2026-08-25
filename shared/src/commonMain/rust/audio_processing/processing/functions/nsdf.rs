@@ -43,7 +43,7 @@ impl NsdfEvaluator {
 
         // 2. Extract primary peak (r1) and secondary non-harmonic peak (r2)
         let (r1, r2) = self.find_primary_and_secondary_peaks(max_tau);
-        let clarity = r1.max(0.0).min(1.0);
+        let clarity = r1.clamp(0.0, 1.0);
         let ratio = if r1 > 1e-4 { (r2 / r1).max(0.0) } else { 1.0 };
 
         (clarity, ratio)
@@ -112,5 +112,11 @@ impl NsdfEvaluator {
         }
 
         (r1, r2)
+    }
+}
+
+impl Default for NsdfEvaluator {
+    fn default() -> Self {
+        Self::new()
     }
 }

@@ -11,7 +11,6 @@ plugins {
     id("dev.gobley.cargo")
     id("dev.gobley.uniffi")
     id("org.jetbrains.kotlin.plugin.atomicfu")
-    kotlin("native.cocoapods")
 }
 
 android {
@@ -33,32 +32,28 @@ android {
     }
 }
 
+val isMac = org.apache.tools.ant.taskdefs.condition.Os.isFamily(
+    org.apache.tools.ant.taskdefs.condition.Os.FAMILY_MAC
+)
+
 kotlin {
     androidTarget()
 
-    listOf(
-        iosArm64(),
-        iosSimulatorArm64()
-    ).forEach { iosTarget ->
-        iosTarget.compilations.getByName("main") {
-            // verovio_interop removed
-        }
-    }
+    if (isMac) {
+        listOf(
+            iosArm64(),
+            iosSimulatorArm64()
+        ).forEach { iosTarget ->
+            iosTarget.binaries.framework {
+                baseName = "Shared"
+                isStatic = true
 
-    cocoapods {
-        summary = "MeliorSonus Shared Library"
-        homepage = "https://github.com/example/meliorsonus"
-        version = "1.0"
-        ios.deploymentTarget = "14.1"
-        framework {
-            baseName = "Shared"
-            isStatic = true
+                export(libs.decompose)
+                export(libs.essenty.lifecycle)
+            }
         }
 
-        // This ensures the .mm and .cpp files are compiled and linked by Xcode
-        extraSpecAttributes["source_files"] = "'src/iosMain/objc/data_sources/**/*.{h,m,mm}'"
     }
-
     sourceSets {
         commonMain {
             kotlin.srcDir("build/generated/source/wire/commonMain")
