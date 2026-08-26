@@ -1,14 +1,25 @@
 #[cfg(test)]
 mod tests {
+    use crate::audio_processing::dsp::CallBackParameters;
+    use crate::audio_processing::dsp::DspCallBack;
+    use crate::audio_processing::instruments::instrument::Instrument;
+    use crate::audio_processing::instruments::notes::*;
+    use crate::audio_processing::processing::feature_extraction::dsp_feature_extractor::DspFeatureExtractor;
+    use crate::audio_processing::processing::feature_extraction::monophonic_feature_extractor::{
+        FeatureExtractorState, NoteFeatureExtractorImpl,
+    };
+    use crate::audio_processing::processing::feature_extraction::polyphonic_feature_extractor::{
+        PolyphonicFeatureExtractorImpl, PolyphonicNoteState, PolyphonyMode,
+    };
+    use crate::audio_processing::processing::functions::harmonic_sieve_mask::HarmonicSieveMasker;
+    use crate::audio_processing::processing::functions::high_pass_filter::BandPassFilter;
+    use crate::audio_processing::processing::functions::mpm::MPM;
+    use crate::audio_processing::processing::functions::nsdf::NsdfEvaluator;
     use crate::constants::*;
-    use crate::high_pass_filter::BandPassFilter;
-    use crate::instruments::Instrument;
-    use crate::monophonic_feature_extractor::*;
-    use crate::mpm::MPM;
-    use crate::notes::*;
-    use crate::prelude::*;
+    use crate::utils::feature_extractor_state::{track_note_state, NoteEnvelopeState};
+    use cpal::StreamConfig;
+    use ringbuf::traits::*;
     use ringbuf::HeapRb;
-    use ringbuf::traits::Split;
 
     fn make_tone_frame(freq_hz: f32, amplitude: f32, sample_rate: u32) -> [f32; FRAME_SIZE] {
         let mut frame = [0.0f32; FRAME_SIZE];
@@ -44,7 +55,7 @@ mod tests {
 
         let ts = 1000u128;
 
-        // 1. Attack / Rise
+        // 1. Attack / Rise at ts = 1000 emits StartNote
         let opt1 = extractor.processing_single_note(
             &a4_attack,
             &cfg,
@@ -52,42 +63,47 @@ mod tests {
             &mut mpm,
             ts,
         );
-        assert!(opt1.is_none());
+        assert_eq!(opt1.len(), 1);
+        let start_note = opt1[0].start().expect("Should emit StartNote upon Rise");
+        assert_eq!(start_note.pitch, Pitch::A);
+        assert_eq!(start_note.octave, Octave::O4);
+        assert_eq!(start_note.note_striked, 1000);
         assert_eq!(extractor.state(), FeatureExtractorState::Rise);
         assert!(extractor.active_note().is_some());
         assert_eq!(extractor.active_note().unwrap().pitch, Pitch::A);
         assert_eq!(extractor.active_note().unwrap().octave, Octave::O4);
 
-        // 2. Peak passed -> Decay
+        // 2. Peak passed -> Decay at ts = 1100 (no new note emitted)
         let opt2 = extractor.processing_single_note(
             &a4_decay,
             &cfg,
             &instrument,
             &mut mpm,
-            ts + 10,
+            ts + 100,
         );
-        assert!(opt2.is_none());
+        assert!(opt2.is_empty());
         assert_eq!(extractor.state(), FeatureExtractorState::Decay);
 
-        // 3. Silence -> Release to Idle
+        // 3. Silence -> Release to Idle at ts = 1500 (emits EndNote)
         let opt3 = extractor.processing_single_note(
             &silent_frame,
             &cfg,
             &instrument,
             &mut mpm,
-            ts + 20,
+            ts + 500,
         );
         assert_eq!(extractor.state(), FeatureExtractorState::Idle);
         assert!(extractor.active_note().is_none());
 
-        // Verify emitted Note
-        let emitted_note = opt3.expect("Should have returned emitted note");
+        // Verify emitted EndNote with deterministic, sample/timestamp-accurate duration
+        assert_eq!(opt3.len(), 1);
+        let emitted_note = opt3[0].end().expect("Should have returned EndNote");
         assert_eq!(emitted_note.pitch, Pitch::A);
         assert_eq!(emitted_note.octave, Octave::O4);
         assert!(emitted_note.loudness_dbfs > -20.0);
-        assert_eq!(emitted_note.note_striked, ts);
-        assert!(emitted_note.note_duration >= 0.0);
-        assert!(emitted_note.rise_duration >= 0.0);
+        assert_eq!(emitted_note.note_striked, 1000);
+        assert_eq!(emitted_note.rise_duration, 0.1);
+        assert_eq!(emitted_note.note_duration, 0.5);
     }
 
     #[test]
@@ -108,7 +124,7 @@ mod tests {
 
         let ts = 1000u128;
 
-        // 1. Play Note C4
+        // 1. Play Note C4 at ts = 1000 -> emits StartNote for C4
         let opt1 = extractor.processing_single_note(
             &c4_frame,
             &cfg,
@@ -116,44 +132,54 @@ mod tests {
             &mut mpm,
             ts,
         );
-        assert!(opt1.is_none());
+        assert_eq!(opt1.len(), 1);
+        let c4_start = opt1[0].start().expect("Should be StartNote for C4");
+        assert_eq!(c4_start.pitch, Pitch::C);
+        assert_eq!(c4_start.octave, Octave::O4);
+        assert_eq!(c4_start.note_striked, 1000);
         assert_eq!(extractor.state(), FeatureExtractorState::Rise);
-        assert_eq!(extractor.active_note().unwrap().pitch, Pitch::C);
-        assert_eq!(extractor.active_note().unwrap().octave, Octave::O4);
 
-        // 2. Legato transition directly into Note D4 (without silence)
+        // 2. Legato transition directly into Note D4 at ts = 1400:
+        // Emits EndNote for C4 (400ms duration) AND StartNote for D4
         let opt2 = extractor.processing_single_note(
             &d4_frame,
             &cfg,
             &instrument,
             &mut mpm,
-            ts + 10,
+            ts + 400,
         );
+        assert_eq!(opt2.len(), 2);
+        let first_end = opt2[0].end().expect("First should be EndNote for C4");
+        assert_eq!(first_end.pitch, Pitch::C);
+        assert_eq!(first_end.octave, Octave::O4);
+        assert_eq!(first_end.note_striked, 1000);
+        assert_eq!(first_end.note_duration, 0.4);
 
-        // First note (C4) should have been emitted
-        let first_note = opt2.expect("First note (C4) should be emitted");
-        assert_eq!(first_note.pitch, Pitch::C);
-        assert_eq!(first_note.octave, Octave::O4);
-        assert_eq!(first_note.note_striked, ts);
+        let second_start = opt2[1].start().expect("Second should be StartNote for D4");
+        assert_eq!(second_start.pitch, Pitch::D);
+        assert_eq!(second_start.octave, Octave::O4);
+        assert_eq!(second_start.note_striked, 1400);
 
         // Active note is now D4
         assert_eq!(extractor.active_note().unwrap().pitch, Pitch::D);
         assert_eq!(extractor.active_note().unwrap().octave, Octave::O4);
 
-        // 3. Release Note D4 with silence
+        // 3. Release Note D4 with silence at ts = 1900 -> emits EndNote for D4 (500ms duration)
         let opt3 = extractor.processing_single_note(
             &silent_frame,
             &cfg,
             &instrument,
             &mut mpm,
-            ts + 20,
+            ts + 900,
         );
         assert_eq!(extractor.state(), FeatureExtractorState::Idle);
 
-        let second_note = opt3.expect("Second note (D4) should be emitted");
-        assert_eq!(second_note.pitch, Pitch::D);
-        assert_eq!(second_note.octave, Octave::O4);
-        assert_eq!(second_note.note_striked, ts + 10);
+        assert_eq!(opt3.len(), 1);
+        let second_end = opt3[0].end().expect("Should be EndNote for D4");
+        assert_eq!(second_end.pitch, Pitch::D);
+        assert_eq!(second_end.octave, Octave::O4);
+        assert_eq!(second_end.note_striked, 1400);
+        assert_eq!(second_end.note_duration, 0.5);
     }
 
     #[test]
@@ -178,8 +204,6 @@ mod tests {
 
     #[test]
     fn test_nsdf_evaluator_monophonic_clarity() {
-        use crate::nsdf::NsdfEvaluator;
-
         let mut nsdf = NsdfEvaluator::new();
 
         // 1. Pure A4 tone (440 Hz) at 44.1kHz -> High monophonic clarity
@@ -204,12 +228,12 @@ mod tests {
 
     #[test]
     fn test_dsp_feature_extractor_dynamic_mode_switching() {
-        let rb = HeapRb::<Note>::new(16);
+        let rb = HeapRb::<Notes>::new(16);
         let (prod, _cons) = rb.split();
 
         let single = NoteFeatureExtractorImpl::new(-40.0);
         let poly = PolyphonicFeatureExtractorImpl::new();
-        let mut extractor = dsp_feature_extractor::new(prod, single, poly, -40.0);
+        let mut extractor = DspFeatureExtractor::new(prod, single, poly, -40.0);
 
         let cfg = StreamConfig {
             channels: 1,
@@ -256,7 +280,7 @@ mod tests {
 
     #[test]
     fn test_update_note_striked() {
-        let mut note = Note {
+        let mut end_note = EndNote {
             pitch: Pitch::C,
             octave: Octave::O4,
             tonality_offset: 0,
@@ -265,11 +289,21 @@ mod tests {
             note_duration: 0.5,
             note_striked: 0,
         };
-        note.update_note_striked(123456789);
-        assert_eq!(note.note_striked, 123456789);
+        end_note.update_note_striked(123456789);
+        assert_eq!(end_note.note_striked, 123456789);
 
-        update_note_striked(&mut note, 987654321);
-        assert_eq!(note.note_striked, 987654321);
+        update_note_striked(&mut end_note, 987654321);
+        assert_eq!(end_note.note_striked, 987654321);
+
+        let mut start_note = StartNote {
+            pitch: Pitch::D,
+            octave: Octave::O4,
+            tonality_offset: 0,
+            loudness_dbfs: -10.0,
+            note_striked: 0,
+        };
+        start_note.update_note_striked(55555);
+        assert_eq!(start_note.note_striked, 55555);
     }
 
     #[test]
@@ -313,7 +347,7 @@ mod tests {
         poly.poly_active_notes[1] = Some(RecordNote::new(Pitch::E, Octave::O4, 0, -10.0, 1200)); // louder
         poly.poly_note_states[1] = PolyphonicNoteState::Rise;
 
-        let mut finalized_notes = Vec::new();
+        let mut finalized_notes: Vec<EndNote> = Vec::new();
         let (primary, state) = poly
             .take_primary_active_note_and_finalize_rest(|n| finalized_notes.push(n))
             .expect("Should return primary note");
@@ -352,16 +386,16 @@ mod tests {
         let silent_frame = [0.0f32; FRAME_SIZE];
         let finalized = poly.process_polyphonic_path(&silent_frame, 44100.0, 5000, -50.0);
 
-        // All 3 notes should be finalized simultaneously without being overwritten
+        // All 3 notes should be finalized simultaneously as EndNotes
         assert_eq!(finalized.len(), 3, "All 3 chord notes must be finalized in the same frame");
-        let pitches: Vec<Pitch> = finalized.iter().map(|n| n.pitch).collect();
+        let pitches: Vec<Pitch> = finalized.iter().map(|n| n.pitch()).collect();
         assert!(pitches.contains(&Pitch::C));
         assert!(pitches.contains(&Pitch::E));
         assert!(pitches.contains(&Pitch::G));
 
         for note in &finalized {
-            // Note striked preserves original onset timestamp 1000
-            assert_eq!(note.note_striked, 1000);
+            assert!(note.is_end());
+            assert_eq!(note.note_striked(), 1000);
         }
     }
 
@@ -382,7 +416,7 @@ mod tests {
             |_, _| {},
             |_| {},
         );
-        assert!(note1.is_none());
+        assert!(note1.is_empty());
         assert_eq!(state, NoteEnvelopeState::Decay);
         assert_eq!(active.as_ref().unwrap().last_dbfs, -22.0);
 
@@ -397,12 +431,17 @@ mod tests {
             |_, _| {},
             |_| {},
         );
-        // The previous note (onset at 1000) should be finalized
-        let finalized = note2.expect("Restrike must finalize the decayed note");
+        // Returns EndNote for previous decayed note AND StartNote for the restrike
+        assert_eq!(note2.len(), 2);
+        let finalized = note2[0].end().expect("Restrike must finalize the decayed note");
         assert_eq!(finalized.pitch, Pitch::A);
         assert_eq!(finalized.note_striked, 1000);
 
-        // A new note is started in Rise state with onset timestamp 1050
+        let restrike_start = note2[1].start().expect("Restrike must emit StartNote");
+        assert_eq!(restrike_start.pitch, Pitch::A);
+        assert_eq!(restrike_start.note_striked, 1050);
+
+        // Active note is in Rise state with onset timestamp 1050
         assert_eq!(state, NoteEnvelopeState::Rise);
         assert!(active.is_some());
         assert_eq!(active.as_ref().unwrap().note_striked, 1050);
@@ -411,8 +450,6 @@ mod tests {
 
     #[test]
     fn test_harmonic_sieve_masks_ghost_but_preserves_chord_notes() {
-        use crate::harmonic_sieve_mask::HarmonicSieveMasker;
-
         let mut sieve = HarmonicSieveMasker::new(0.0002, 6);
         let mut raw_probs = [0.0f32; PITCH_BINS];
         let mut sieved_probs = [0.0f32; PITCH_BINS];
@@ -436,6 +473,70 @@ mod tests {
         assert_eq!(
             sieved_probs[48], 0.75,
             "High-confidence genuine chord note must NOT be zeroed by the harmonic sieve"
+        );
+    }
+
+    #[test]
+    fn test_offline_sample_accurate_timestamps_and_durations() {
+        let rb = HeapRb::<Notes>::new(16);
+        let (prod, mut cons) = rb.split();
+
+        let single = NoteFeatureExtractorImpl::new(-40.0);
+        let poly = PolyphonicFeatureExtractorImpl::new();
+        let mut extractor = DspFeatureExtractor::new(prod, single, poly, -40.0);
+
+        // Reset stream time to 0 for deterministic offline / WAV file processing
+        extractor.reset_stream_time(0);
+
+        let cfg = StreamConfig {
+            channels: 1,
+            sample_rate: 44100,
+            buffer_size: cpal::BufferSize::Default,
+        };
+        let mut filter = BandPassFilter::new(30.0, 10000.0, 44100);
+        let instrument = Instrument::Piano;
+        let mut mpm = MPM::new(FRAME_SIZE / 2);
+
+        let a4_frame = make_tone_frame(440.0, 0.8, 44100);
+        let silent_frame = [0.0f32; FRAME_SIZE];
+
+        // Process 43 frames of A4 tone (43 hops * 512 samples = 22,016 samples ~= 0.4992s at 44.1kHz)
+        for _ in 0..43 {
+            extractor.dsp_callback(CallBackParameters {
+                buffer: &a4_frame,
+                cfg: &cfg,
+                filter: &mut filter,
+                instrument: &instrument,
+                mpm: &mut mpm,
+            });
+        }
+
+        // Finalize note with 1 frame of silence
+        extractor.dsp_callback(CallBackParameters {
+            buffer: &silent_frame,
+            cfg: &cfg,
+            filter: &mut filter,
+            instrument: &instrument,
+            mpm: &mut mpm,
+        });
+
+        // 1. The first emitted note in the ringbuffer is StartNote
+        let start_event = cons.try_pop().expect("StartNote should be in ringbuffer");
+        let start_note = start_event.start().expect("First event should be StartNote");
+        assert_eq!(start_note.pitch, Pitch::A);
+        assert_eq!(start_note.octave, Octave::O4);
+        assert_eq!(start_note.note_striked, 0, "Onset timestamp must match base stream time 0ms");
+
+        // 2. The second emitted note in the ringbuffer is EndNote
+        let end_event = cons.try_pop().expect("EndNote should be in ringbuffer");
+        let end_note = end_event.end().expect("Second event should be EndNote");
+        assert_eq!(end_note.pitch, Pitch::A);
+        assert_eq!(end_note.octave, Octave::O4);
+        assert_eq!(end_note.note_striked, 0, "Onset timestamp must match base stream time 0ms");
+        assert!(
+            (end_note.note_duration - 0.499).abs() < 0.05,
+            "Offline note duration must be sample-accurate (~0.5s), got {}",
+            end_note.note_duration
         );
     }
 }

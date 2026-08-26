@@ -1,7 +1,4 @@
-/* TOLO:
-*  Might need to add more implementations for the custom enum
-*/
-#[derive(uniffi::Enum, Debug, Clone, Copy)]
+#[derive(uniffi::Enum, Debug, Clone, Copy, PartialEq)]
 pub enum Instrument {
     Violin,
     Viola,
@@ -34,7 +31,7 @@ pub enum Instrument {
     },
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct FilterRange {
     pub hpf_cutoff_hz: f32,
     pub min_f0_hz: f32,
@@ -42,7 +39,7 @@ pub struct FilterRange {
     pub harmonic_ceiling_hz: f32,
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq)]
 pub struct MpmConfig {
     pub power_threshold: f32,
     pub clarity_threshold: f32,
@@ -65,7 +62,6 @@ impl Instrument {
                 is_strictly_monophonic: false,
                 min_poly_clarity: 0.55,
             },
-
             Instrument::AcousticGuitar | Instrument::ElectricGuitar => MpmConfig {
                 power_threshold: 0.015,
                 clarity_threshold: 0.72,
@@ -78,7 +74,6 @@ impl Instrument {
                 is_strictly_monophonic: false,
                 min_poly_clarity: 0.55,
             },
-
             Instrument::Flute | Instrument::ClarinetBb | Instrument::Oboe => MpmConfig {
                 power_threshold: 0.010,
                 clarity_threshold: 0.85,
@@ -91,7 +86,6 @@ impl Instrument {
                 is_strictly_monophonic: true,
                 min_poly_clarity: 0.65,
             },
-
             Instrument::TrumpetBb | Instrument::FrenchHorn | Instrument::TromboneTenor => {
                 MpmConfig {
                     power_threshold: 0.010,
@@ -106,14 +100,12 @@ impl Instrument {
                 is_strictly_monophonic: true,
                 min_poly_clarity: 0.55,
             },
-
             Instrument::Piano => MpmConfig {
                 power_threshold: 0.010,
                 clarity_threshold: 0.75,
                 is_strictly_monophonic: false,
                 min_poly_clarity: 0.50,
             },
-
             Instrument::VoiceSoprano | Instrument::VoiceTenor | Instrument::VoiceBass => {
                 MpmConfig {
                     power_threshold: 0.008,
@@ -122,7 +114,6 @@ impl Instrument {
                     min_poly_clarity: 0.55,
                 }
             }
-
             Instrument::Generic | Instrument::Custom { .. } => MpmConfig {
                 power_threshold: 0.010,
                 clarity_threshold: 0.75,

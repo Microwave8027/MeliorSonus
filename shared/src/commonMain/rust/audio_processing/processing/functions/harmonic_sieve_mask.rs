@@ -1,4 +1,5 @@
 use crate::constants::*;
+
 /// Pre-allocated Harmonic Sieve Layer for piano harmonic disentanglement
 pub struct HarmonicSieveMasker {
     inharmonicity_b: f32,

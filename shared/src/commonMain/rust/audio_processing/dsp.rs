@@ -1,36 +1,22 @@
 /*
-* The dsp is not a a noise cancellation machine, it simply just processes audio. Here is the general layout:
-Hardware Buffer (&[u8])
-       │
-       ▼ (Decode PCM)
-Raw Floats (&[f32])
-       │
-       ▼
-[High-Pass Filter (>30 Hz)] ──► Strips DC / Subsonic Rumble
-       │
-       ▼
-┌──────────────────────────────────────────────────────────┐
-│ Time-Domain Stage (Low CPU, Zero Latency)                │
-│  ├─ RMS & Dynamic Level Calculation                      │
-│  ├─ Attack/Transient Slope Detection (Staccato/Accent)   │
-│  └─ YIN / MPM Pitch Tracker (f0 -> MIDI Note & Cents)    │
-└──────────────────────────────┬───────────────────────────┘
-                               │
-                               ▼ (Overlap Framing & Windowing, noise cancellation algorithm)
-┌──────────────────────────────────────────────────────────┐
-│ Frequency-Domain Stage (FFT)                             │
-│  ├─ Compute Magnitude Spectrum |X[k]|                    │
-│  ├─ Spectral Denoising (Spectral Subtraction / Wiener)   │
-│  ├─ Harmonics-to-Noise Ratio (HNR) & Spectral Flatness   │
-│  ├─ Spectral Centroid (Tone Brightness)                  │
-└──────────────────────────────────────────────────────────┘
-* In fact, noise cancellation might not even be used
-* The entire workflow is done on one threadw(its cpu bound)
-*/
+ * MELIORSONUS DSP AUDIO PIPELINE & FEATURE EXTRACTION COORDINATOR
+ */
 
-use crate::{
-    constants::*, high_pass_filter::BandPassFilter, instruments::Instrument, mpm::MPM, prelude::*,
-};
+use crate::audio_processing::cpal::engine::AudioEngine;
+use crate::audio_processing::instruments::instrument::Instrument;
+use crate::audio_processing::instruments::notes::Notes;
+use crate::audio_processing::processing::feature_extraction::dsp_feature_extractor::DspFeatureExtractor;
+use crate::audio_processing::processing::feature_extraction::monophonic_feature_extractor::NoteFeatureExtractorImpl;
+use crate::audio_processing::processing::feature_extraction::polyphonic_feature_extractor::PolyphonicFeatureExtractorImpl;
+use crate::audio_processing::processing::functions::high_pass_filter::BandPassFilter;
+use crate::audio_processing::processing::functions::mpm::MPM;
+use crate::constants::*;
+use crate::utils::error_callback::ErrorCallback;
+use cpal::StreamConfig;
+use ringbuf::traits::*;
+use ringbuf::{HeapCons, HeapRb};
+use std::error::Error;
+use std::sync::Arc;
 
 pub struct CallBackParameters<'a> {
     pub buffer: &'a [f32; FRAME_SIZE],
@@ -39,6 +25,7 @@ pub struct CallBackParameters<'a> {
     pub instrument: &'a Instrument,
     pub mpm: &'a mut MPM,
 }
+
 pub trait DspCallBack: Send + 'static {
     fn dsp_callback(
         &mut self,
@@ -53,18 +40,17 @@ pub trait DspCallBack: Send + 'static {
     }
 }
 
-#[allow(dead_code)]
 pub struct Dsp<T: ErrorCallback> {
-    instrument: Instrument,
-    silence_threshold: f32,
-    rb_cons: Option<HeapCons<Note>>,
+    pub instrument: Instrument,
+    pub silence_threshold: f32,
+    rb_cons: Option<HeapCons<Notes>>,
     error_callback: Arc<T>,
     pub audio_engine: AudioEngine<DspFeatureExtractor, T>,
 }
 
 impl<T: ErrorCallback> Dsp<T> {
-    pub fn new(instrument: Instrument, silence_threshold: f32, error_callback: T) -> Self {
-        let rb = HeapRb::<Note>::new(NOTE_RINGBUF_CAPACITY);
+    pub fn new(instrument: Instrument, silence_threshold: f32, error_callback: Arc<T>) -> Self {
+        let rb = HeapRb::<Notes>::new(NOTE_RINGBUF_CAPACITY);
         let (prod, cons) = rb.split();
         let feature_extractor = DspFeatureExtractor::new(
             prod,
@@ -72,17 +58,20 @@ impl<T: ErrorCallback> Dsp<T> {
             PolyphonicFeatureExtractorImpl::new(),
             silence_threshold,
         );
-        let arc_err_callback = Arc::new(error_callback);
         let audio_engine =
-            AudioEngine::new(instrument, feature_extractor, Arc::clone(&arc_err_callback));
+            AudioEngine::new(instrument, feature_extractor, Arc::clone(&error_callback));
 
         Self {
             instrument,
             silence_threshold,
             rb_cons: Some(cons),
-            error_callback: arc_err_callback,
+            error_callback,
             audio_engine,
         }
+    }
+
+    pub fn error_callback(&self) -> &Arc<T> {
+        &self.error_callback
     }
 
     pub fn start(&mut self) -> Result<(), Box<dyn Error>> {
@@ -120,5 +109,13 @@ impl<T: ErrorCallback> Dsp<T> {
 
     pub fn stop(mut self) {
         self.audio_engine.end();
+    }
+
+    pub fn take_consumer(&mut self) -> Option<HeapCons<Notes>> {
+        self.rb_cons.take()
+    }
+
+    pub fn pop_note(&mut self) -> Option<Notes> {
+        self.rb_cons.as_mut().and_then(|cons| cons.try_pop())
     }
 }

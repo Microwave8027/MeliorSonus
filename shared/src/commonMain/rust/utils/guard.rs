@@ -1,6 +1,7 @@
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+/// RAII Drop Guard ensuring atomic flags are safely reset when dropped or when threads exit.
 pub struct DropGuard(Arc<AtomicBool>);
 
 impl DropGuard {

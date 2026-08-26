@@ -1,32 +1,34 @@
-use crate::constants::*;
-use crate::dsp::{CallBackParameters, DspCallBack};
-use crate::monophonic_feature_extractor::NoteFeatureExtractorImpl;
-use crate::notes::*;
-use crate::nsdf::NsdfEvaluator;
-use crate::polyphonic_feature_extractor::{
+use crate::audio_processing::dsp::{CallBackParameters, DspCallBack};
+use crate::audio_processing::instruments::notes::*;
+use crate::audio_processing::processing::feature_extraction::monophonic_feature_extractor::NoteFeatureExtractorImpl;
+use crate::audio_processing::processing::feature_extraction::polyphonic_feature_extractor::{
     PolyphonicFeatureExtractorImpl, PolyphonicNoteState, PolyphonyMode,
 };
-use crate::rms_dbfs::loudness;
-use ringbuf::HeapProd;
+use crate::audio_processing::processing::functions::nsdf::NsdfEvaluator;
+use crate::audio_processing::processing::functions::rms_dbfs::loudness;
+use crate::constants::*;
 use ringbuf::traits::Producer;
+use ringbuf::HeapProd;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-#[allow(non_camel_case_types)]
-pub struct dsp_feature_extractor {
-    pub note_rb: HeapProd<Note>,
+pub struct DspFeatureExtractor {
+    pub note_rb: HeapProd<Notes>,
     pub single_note_extractor: NoteFeatureExtractorImpl,
     pub polyphonic_extractor: PolyphonicFeatureExtractorImpl,
     pub mode: PolyphonyMode,
     pub nsdf_evaluator: NsdfEvaluator,
     pub hangover_counter: u8,
     pub silence_threshold_dbfs: f32,
+    pub processed_samples: u64,
+    pub base_timestamp: Option<u128>,
 }
 
-pub type DspFeatureExtractor = dsp_feature_extractor;
+#[allow(non_camel_case_types)]
+pub type dsp_feature_extractor = DspFeatureExtractor;
 
-impl dsp_feature_extractor {
+impl DspFeatureExtractor {
     pub fn new(
-        note_rb: HeapProd<Note>,
+        note_rb: HeapProd<Notes>,
         single_note_extractor: NoteFeatureExtractorImpl,
         polyphonic_extractor: PolyphonicFeatureExtractorImpl,
         silence_threshold_dbfs: f32,
@@ -39,15 +41,46 @@ impl dsp_feature_extractor {
             nsdf_evaluator: NsdfEvaluator::new(),
             hangover_counter: HANGOVER_FRAMES_DEFAULT,
             silence_threshold_dbfs,
+            processed_samples: 0,
+            base_timestamp: None,
         }
     }
 
     pub fn mode(&self) -> PolyphonyMode {
         self.mode
     }
+
+    pub fn set_base_timestamp(&mut self, base: u128) {
+        self.base_timestamp = Some(base);
+    }
+
+    pub fn reset_stream_time(&mut self, base: u128) {
+        self.base_timestamp = Some(base);
+        self.processed_samples = 0;
+    }
+
+    pub fn compute_frame_timestamp(&mut self, sample_rate: u32) -> u128 {
+        let base = match self.base_timestamp {
+            Some(ts) => ts,
+            None => {
+                let ts = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_millis();
+                self.base_timestamp = Some(ts);
+                ts
+            }
+        };
+
+        let rate = (sample_rate as u64).max(1);
+        let elapsed_ms = (self.processed_samples * 1000) / rate;
+        let ts = base + elapsed_ms as u128;
+        self.processed_samples += HOP_SIZE as u64;
+        ts
+    }
 }
 
-impl DspCallBack for dsp_feature_extractor {
+impl DspCallBack for DspFeatureExtractor {
     fn dsp_callback(
         &mut self,
         CallBackParameters {
@@ -58,25 +91,22 @@ impl DspCallBack for dsp_feature_extractor {
             mpm,
         }: CallBackParameters,
     ) {
-        let timestamp: u128 = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_millis();
+        let timestamp = self.compute_frame_timestamp(cfg.sample_rate);
 
         let filtered_frame = filter.process_frames(buffer);
-        let dbfs = loudness(filtered_frame.as_slice());
+        let dbfs = loudness(&filtered_frame);
 
         if dbfs < self.silence_threshold_dbfs {
             // Finalize & push all active polyphonic notes to ringbuffer
             for i in 0..MAX_POLYPHONY {
                 if let Some(active) = self.polyphonic_extractor.poly_active_notes[i].take() {
                     self.polyphonic_extractor.poly_note_states[i] = PolyphonicNoteState::Idle;
-                    let note = active.into_note();
-                    let _ = self.note_rb.try_push(note);
+                    let note = active.into_end_note_with_timestamp(timestamp);
+                    let _ = self.note_rb.try_push(Notes::End(note));
                 }
             }
 
-            if let Some(note) = self.single_note_extractor.processing_single_note(
+            for note in self.single_note_extractor.processing_single_note(
                 &filtered_frame,
                 cfg,
                 instrument,
@@ -126,7 +156,7 @@ impl DspCallBack for dsp_feature_extractor {
                 if let Some((primary, state)) = self
                     .polyphonic_extractor
                     .take_primary_active_note_and_finalize_rest(|finalized| {
-                        let _ = self.note_rb.try_push(finalized);
+                        let _ = self.note_rb.try_push(Notes::End(finalized));
                     })
                 {
                     self.single_note_extractor.adopt_note(primary, state);
@@ -141,7 +171,7 @@ impl DspCallBack for dsp_feature_extractor {
 
             PolyphonyMode::SingleNoteFastPath => {
                 // Delegate to MPM Fast Path (0 CRNN Overhead)
-                if let Some(note) = self.single_note_extractor.processing_single_note(
+                for note in self.single_note_extractor.processing_single_note(
                     &filtered_frame,
                     cfg,
                     instrument,

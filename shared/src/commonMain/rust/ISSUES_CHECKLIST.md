@@ -101,11 +101,10 @@ This checklist tracks known bugs, edge cases, state machine quirks, performance 
   - **File:** [`nsdf.rs`](file:///C:/Users/micro/StudioProjects/MeliorSonus/shared/src/commonMain/rust/audio_processing/processing/functions/nsdf.rs#L54-L105)
   - **Status:** Resolved (introduced `MIN_TAU = 8` in peak search).
 
-- [?] **10. Duration Tracking: Sample-Count vs `Instant::now()`**
+- [x] **10. Duration Tracking: Sample-Count vs `Instant::now()`**
   - **File:** [`notes.rs`](file:///C:/Users/micro/StudioProjects/MeliorSonus/shared/src/commonMain/rust/audio_processing/instruments/notes.rs#L13-L63)
-  - **Issue:** `RecordNote` measures duration with `Instant::now().elapsed()`. While fine for real-time mic listening, this is subject to OS thread scheduling jitter (e.g. 5ms sleep loop) and cannot be used for deterministic offline processing (e.g. WAV file tests/benchmarking).
-  - **Status:** Should be fine for now since the app is focused on real time audio tracking not file sampling. 
-  - **Recommendation:** Track duration via frame/sample index (`frame_count * HOP_SIZE / sample_rate`), which provides deterministic, sample-accurate durations.
+  - **Status:** Resolved (Replaced `Instant::now()` with audio stream sample-clock math and deterministic millisecond timestamps).
+  - **Details:** `RecordNote` and `dsp_feature_extractor` now track duration and note onset via stream sample index (`frame_count * HOP_SIZE / sample_rate`) and frame timestamps. Offline / WAV file processing and real-time capture both produce 100% deterministic, sample-accurate note durations and onset timestamps independent of CPU speed or thread jitter.
 
 ---
 

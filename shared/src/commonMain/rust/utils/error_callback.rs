@@ -1,4 +1,4 @@
-use crate::prelude::*;
+use crate::utils::errors::RustError;
 
 #[uniffi::export(callback_interface)]
 pub trait ErrorCallback: Send + Sync + 'static {

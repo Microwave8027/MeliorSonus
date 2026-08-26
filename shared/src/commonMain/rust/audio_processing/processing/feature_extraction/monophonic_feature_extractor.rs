@@ -1,35 +1,11 @@
-/*
-[ Polyphonic Audio Mixture ]
-                              │
-                              ▼
-           [ Multi-Pitch Transcriber (CRNN / AMT) ]
-                              │
-            Outputs Active Pitches ($f_0^{(i)}$) & Timestamps
-                              │
-                              ▼
-             [ Harmonic Sieve / Masking Layer ]
-             (Removes collided harmonic peaks)
-            ┌─────────────────┴─────────────────┐
-            ▼                                   ▼
-    [ Voice A Slices ]                  [ Voice B Slices ]
-            │                                   │
- ┌──────────┴──────────┐             ┌──────────┴──────────┐
- ▼                     ▼             ▼                     ▼
-[Attack & ADSR]   [HNR & Timbre]   [Attack & ADSR]   [HNR & Timbre]
-* TODO
-* Currently no algorithms requiring ffi are implemented. A basic mpm and rms dbfs are used for calculating pitch, tonality, loudness, and a duration is returned which can later be calculated.
-* Look in dsp.rs for workflow
-* The DspCallback currently only calls the single note feature extractor, no harmonic sieve or crnn for serperation yet.
-* Mpm will be removed if a crnn processes it
-* the crnn will go to sleep if a algorithm decides its not that complicated.
- */
+use crate::audio_processing::instruments::instrument::Instrument;
+use crate::audio_processing::instruments::notes::*;
+use crate::audio_processing::processing::functions::mpm::MPM;
+use crate::audio_processing::processing::functions::rms_dbfs::loudness;
 use crate::constants::*;
-use crate::instruments::Instrument;
-use crate::mpm::MPM;
-use crate::notes::*;
-use crate::prelude::*;
-use crate::processor::{NoteEnvelopeState, track_note_state};
-use crate::rms_dbfs::*;
+use crate::utils::feature_extractor_state::{track_note_state, NoteEnvelopeState};
+use arrayvec::ArrayVec;
+use cpal::StreamConfig;
 
 pub type FeatureExtractorState = NoteEnvelopeState;
 
@@ -56,11 +32,11 @@ impl NoteFeatureExtractorImpl {
         self.active_note.as_ref()
     }
 
-    pub fn finalize_note(&mut self) -> Option<Note> {
-        self.active_note.take().map(|active| active.into_note())
+    pub fn finalize_note(&mut self) -> Option<EndNote> {
+        self.active_note.take().map(|active| active.into_end_note())
     }
 
-    pub fn reset(&mut self) -> Option<Note> {
+    pub fn reset(&mut self) -> Option<EndNote> {
         let finalized = self.finalize_note();
         self.state = FeatureExtractorState::Idle;
         self.active_note = None;
@@ -85,8 +61,8 @@ impl NoteFeatureExtractorImpl {
         instrument: &Instrument,
         mpm: &mut MPM,
         time_stamp: u128,
-    ) -> Option<Note> {
-        let dbfs = loudness(filtered_frame.as_slice());
+    ) -> ArrayVec<Notes, 2> {
+        let dbfs = loudness(filtered_frame);
         let frequency = mpm.mpm(filtered_frame, cfg, instrument);
 
         let detected = if dbfs >= self.thresh_hold {
@@ -101,7 +77,7 @@ impl NoteFeatureExtractorImpl {
             detected,
             dbfs,
             time_stamp,
-            |_| {}, // additional functions when needed
+            |_| {},
             |_, _| {},
             |_| {},
         )

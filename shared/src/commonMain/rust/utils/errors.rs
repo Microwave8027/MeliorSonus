@@ -1,4 +1,6 @@
-#[derive(Debug, uniffi::Error)]
+use std::fmt;
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Error)]
 #[uniffi(flat_error)]
 pub enum RustError {
     StreamBuildError(String),
@@ -6,8 +8,8 @@ pub enum RustError {
     Custom(String),
 }
 
-impl std::fmt::Display for RustError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for RustError {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Custom(msg) => write!(f, "{msg}"),
             Self::BufferOverfill => write!(f, "Audio Buffer Overfilled!"),

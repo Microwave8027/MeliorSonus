@@ -1,21 +1,10 @@
-/*
- * Polyphonic Feature Extractor & Harmonic Sieve Architecture
- *
- * Provides dual-path real-time audio analysis:
- * 1. Fast-Path Monophonic: Bypasses CRNN (CRNN Sleep Mode = 0% CPU) when NSDF clarity is high.
- *    Delegates to `NoteFeatureExtractorImpl` using McLeod Pitch Method (MPM).
- * 2. Polyphonic CRNN + Harmonic Sieve Path: Triggered when NSDF clarity drops below threshold
- *    or secondary peak ratio indicates multiple active fundamental frequencies.
- *    Applies Log-CQT binning and Harmonic Sieve comb filtering to disentangle ghost harmonics.
- *
- * Preserves 100% of existing `RecordNote` envelope tracking (Instant::now(), rise_time, note_duration, peak_dbfs).
- */
-
+use crate::audio_processing::instruments::notes::*;
+use crate::audio_processing::processing::functions::harmonic_sieve_mask::HarmonicSieveMasker;
 use crate::constants::*;
-use crate::harmonic_sieve_mask::HarmonicSieveMasker;
-use crate::notes::*;
-use crate::processor::{NoteEnvelopeState, track_note_state};
+use crate::utils::feature_extractor_state::{track_note_state, NoteEnvelopeState};
 use arrayvec::ArrayVec;
+
+pub const MAX_POLYPHONIC_EVENTS: usize = MAX_POLYPHONY * 2;
 
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum PolyphonyMode {
@@ -54,7 +43,7 @@ impl PolyphonicFeatureExtractorImpl {
         sample_rate: f32,
         timestamp: u128,
         dbfs: f32,
-    ) -> ArrayVec<Note, MAX_POLYPHONY> {
+    ) -> ArrayVec<Notes, MAX_POLYPHONIC_EVENTS> {
         Self::run_tract_inference(buffer, &mut self.crnn_pitch_probs);
 
         self.sieve.apply_sieve(
@@ -63,7 +52,7 @@ impl PolyphonicFeatureExtractorImpl {
             &mut self.sieved_pitch_probs,
         );
 
-        let mut finalized_notes = ArrayVec::new();
+        let mut events = ArrayVec::new();
 
         // Update Multi-Note State Machine across pre-allocated slots
         for bin in 0..PITCH_BINS {
@@ -76,9 +65,8 @@ impl PolyphonicFeatureExtractorImpl {
                 // Find existing active slot for this pitch/octave
                 let mut slot_idx = None;
                 for (i, slot) in self.poly_active_notes.iter().enumerate() {
-                    if slot
-                        .as_ref()
-                        .is_some_and(|r| r.pitch == pitch && r.octave == octave)
+                    if let Some(r) = slot
+                        && r.pitch == pitch && r.octave == octave
                     {
                         slot_idx = Some(i);
                         break;
@@ -97,7 +85,7 @@ impl PolyphonicFeatureExtractorImpl {
 
                 if let Some(i) = slot_idx {
                     let mut env_state: NoteEnvelopeState = self.poly_note_states[i];
-                    if let Some(note) = track_note_state(
+                    for note in track_note_state(
                         &mut env_state,
                         &mut self.poly_active_notes[i],
                         Some((pitch, octave, 0)),
@@ -107,19 +95,20 @@ impl PolyphonicFeatureExtractorImpl {
                         |_, _| {},
                         |_| {},
                     ) {
-                        finalized_notes.push(note);
+                        let _ = events.try_push(note);
                     }
                     self.poly_note_states[i] = env_state;
                 }
             } else {
                 // Inactive: if this pitch was active, transition to None / Idle
                 for i in 0..MAX_POLYPHONY {
-                    let is_match = self.poly_active_notes[i]
-                        .as_ref()
-                        .is_some_and(|r| r.pitch == pitch && r.octave == octave);
+                    let is_match = match &self.poly_active_notes[i] {
+                        Some(r) => r.pitch == pitch && r.octave == octave,
+                        None => false,
+                    };
                     if is_match {
                         let mut env_state: NoteEnvelopeState = self.poly_note_states[i];
-                        if let Some(note) = track_note_state(
+                        for note in track_note_state(
                             &mut env_state,
                             &mut self.poly_active_notes[i],
                             None,
@@ -129,7 +118,7 @@ impl PolyphonicFeatureExtractorImpl {
                             |_, _| {},
                             |_| {},
                         ) {
-                            finalized_notes.push(note);
+                            let _ = events.try_push(note);
                         }
                         self.poly_note_states[i] = env_state;
                     }
@@ -137,7 +126,7 @@ impl PolyphonicFeatureExtractorImpl {
             }
         }
 
-        finalized_notes
+        events
     }
 
     /// Zero-allocation placeholder for ONNX runtime inference via tract-onnx SimplePlan
@@ -152,11 +141,14 @@ impl PolyphonicFeatureExtractorImpl {
                 .as_mut()
                 .filter(|e| e.pitch == note.pitch && e.octave == note.octave)
             {
-                if note.beginning < existing.beginning {
-                    existing.beginning = note.beginning;
+                if note.note_striked < existing.note_striked {
                     existing.note_striked = note.note_striked;
                 }
                 existing.add_peak_dbfs(note.peak_dbfs);
+                existing.last_timestamp = existing.last_timestamp.max(note.last_timestamp);
+                if note.rise_duration.is_some() && existing.rise_duration.is_none() {
+                    existing.rise_duration = note.rise_duration;
+                }
                 self.poly_note_states[i] = state;
                 return;
             }
@@ -177,7 +169,7 @@ impl PolyphonicFeatureExtractorImpl {
         mut on_finalize: F,
     ) -> Option<(RecordNote, PolyphonicNoteState)>
     where
-        F: FnMut(Note),
+        F: FnMut(EndNote),
     {
         // Find the loudest active note to adopt as primary
         let mut primary_idx = None;
@@ -202,7 +194,7 @@ impl PolyphonicFeatureExtractorImpl {
         for i in 0..MAX_POLYPHONY {
             if let Some(active) = self.poly_active_notes[i].take() {
                 self.poly_note_states[i] = PolyphonicNoteState::Idle;
-                let note = active.into_note();
+                let note = active.into_end_note();
                 on_finalize(note);
             }
         }

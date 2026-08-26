@@ -1,7 +1,8 @@
+use crate::audio_processing::instruments::instrument::Instrument;
 use crate::constants::*;
-use crate::prelude::*;
-use pitch_detection::detector::PitchDetector;
+use cpal::StreamConfig;
 use pitch_detection::detector::mcleod::McLeodDetector;
+use pitch_detection::detector::PitchDetector;
 
 pub struct MPM {
     pitch_detector: McLeodDetector<f32>,

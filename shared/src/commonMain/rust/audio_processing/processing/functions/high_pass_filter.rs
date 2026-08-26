@@ -10,6 +10,7 @@ enum FilterType {
     HighPass,
     LowPass,
 }
+
 pub struct BiquadFilter {
     filter_type: FilterType,
     a1: f32,

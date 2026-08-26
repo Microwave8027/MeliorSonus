@@ -1,55 +1,42 @@
 uniffi::setup_scaffolding!();
 
-mod paths;
-pub use paths::*;
+pub mod audio_processing;
+pub mod card_output;
+pub mod constants;
+pub mod utils;
+
+#[cfg(test)]
+mod tests;
 
 pub mod prelude {
-    pub use crate::audio_engine::AudioEngine;
-    pub use crate::card::{Card, CardType};
-    pub use crate::dsp::{CallBackParameters, DspCallBack};
-    pub use crate::dsp_feature_extractor::{DspFeatureExtractor, dsp_feature_extractor};
-    pub use crate::error_callback::ErrorCallback;
-    pub use crate::errors::*;
-    pub use crate::guard::DropGuard;
-    pub use crate::instruments::{FilterRange, Instrument, MpmConfig};
-    pub use crate::monophonic_feature_extractor::NoteFeatureExtractorImpl;
-    pub use crate::notes::Note;
-    pub use crate::polyphonic_feature_extractor::{
+    pub use crate::audio_processing::cpal::engine::AudioEngine;
+    pub use crate::audio_processing::dsp::{CallBackParameters, Dsp, DspCallBack};
+    pub use crate::audio_processing::instruments::instrument::{FilterRange, Instrument, MpmConfig};
+    pub use crate::audio_processing::instruments::notes::{
+        EndNote, Notes, Octave, Pitch, RecordNote, StartNote,
+    };
+    pub use crate::audio_processing::processing::feature_extraction::dsp_feature_extractor::DspFeatureExtractor;
+    pub use crate::audio_processing::processing::feature_extraction::monophonic_feature_extractor::{
+        FeatureExtractorState, NoteFeatureExtractorImpl,
+    };
+    pub use crate::audio_processing::processing::feature_extraction::polyphonic_feature_extractor::{
         PolyphonicFeatureExtractorImpl, PolyphonicNoteState, PolyphonyMode,
     };
-    pub use crate::processor::{NoteEnvelopeState, track_note_state};
+    pub use crate::audio_processing::processing::functions::harmonic_sieve_mask::HarmonicSieveMasker;
+    pub use crate::audio_processing::processing::functions::high_pass_filter::BandPassFilter;
+    pub use crate::audio_processing::processing::functions::mpm::MPM;
+    pub use crate::audio_processing::processing::functions::nsdf::NsdfEvaluator;
+    pub use crate::audio_processing::processing::functions::rms_dbfs::loudness;
+    pub use crate::card_output::card::{Card, CardType, test};
+    pub use crate::constants::*;
+    pub use crate::utils::error_callback::ErrorCallback;
+    pub use crate::utils::errors::RustError;
+    pub use crate::utils::feature_extractor_state::{track_note_state, NoteEnvelopeState};
+    pub use crate::utils::guard::DropGuard;
     pub use cpal::{Stream, StreamConfig};
-    pub use ringbuf::{HeapCons, HeapProd, HeapRb, traits::*};
+    pub use ringbuf::{traits::*, HeapCons, HeapProd, HeapRb};
     pub use std::error::Error;
     pub use std::sync::atomic::{AtomicBool, Ordering};
     pub use std::sync::{Arc, Mutex};
     pub use std::thread;
 }
-
-// constants
-pub mod constants {
-    // [polyphonic audio extractor]
-    pub const MAX_POLYPHONY: usize = 16;
-    pub const PITCH_BINS: usize = 88; // Piano keys A0 (MIDI 21) to C8 (MIDI 108)
-    pub const HANGOVER_FRAMES_DEFAULT: u8 = 5;
-
-    // [CPAL Audio Engine]
-    pub const FRAME_SIZE: usize = 1024;
-    pub const RINGBUF_CAPACITY: usize = 16384;
-    pub const NOTE_RINGBUF_CAPACITY: usize = 1024;
-    pub const PREFERRED_RATES: [u32; 2] = [44100, 48000];
-    pub const HOP_SIZE: usize = FRAME_SIZE / 2;
-}
-
-// Logger likely will not be used as i dont want to debug a logger and errors can generally be handled
-/*
-#[uniffi::export]
-pub fn init_logging() {
-    #[cfg(target_os = "android")]
-    android_logger::init_once(
-        android_logger::Config::default()
-            .with_max_level(log::LevelFilter::Debug)
-            .with_tag("RustCore"),
-    );
-}
-*/

@@ -1,29 +1,29 @@
 /*
-* Added a bunch of log infos that likely will not be used
-* moved the audio engine new to just take no parameters and pass back audio engine
-* added EngineSignal Enum
-* Error handling:
-* for most errors they will be returned as normal, but for errors that happen past the initialization of the audio engine will be accessed via the supervisor handle's join result.
-* the higher up caller will need to manually reset the audio engine
-* Usage:
-* Call AudioEngine::new() to create a new audio engine
-* If there is a problem building the stream, the audio engine is playing will become false and there will be a StreamBuildError in the thread_ error
-* In that case, the higher up will have to call AudioEngine::reset() to clear the errors and allow the audio engine to be played again
-* If the buffer is near full, then then the stream will exit and the user will need to reset and accomadate for errors. This process should be automatic with an alert on the user side.
-* Feature extractor is now passed into the engine signal. Upon reset a new one will be created
-* Todo:
-** currently none
-*/
+ * Audio Engine Implementation using CPAL
+ *
+ * Usage:
+ * Call AudioEngine::new() to create a new audio engine
+ * If there is a problem building the stream, the audio engine is_playing will become false and an error callback will fire.
+ * Feature extractor is passed into the engine. Upon reset a new one will be created.
+ */
 
+use crate::audio_processing::dsp::{CallBackParameters, DspCallBack};
+use crate::audio_processing::instruments::instrument::Instrument;
+use crate::audio_processing::processing::functions::high_pass_filter::BandPassFilter;
+use crate::audio_processing::processing::functions::mpm::MPM;
 use crate::constants::*;
-use crate::high_pass_filter::BandPassFilter;
-use crate::instruments::Instrument;
-use crate::mpm::MPM;
-use crate::prelude::*;
-use cpal::SampleFormat;
+use crate::utils::error_callback::ErrorCallback;
+use crate::utils::errors::RustError;
+use crate::utils::guard::DropGuard;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
-use ringbuf::{HeapCons, HeapRb, traits::*};
+use cpal::{SampleFormat, Stream, StreamConfig};
+use ringbuf::traits::*;
+use ringbuf::{HeapCons, HeapRb};
+use std::error::Error;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, TryRecvError};
+use std::sync::Arc;
+use std::thread;
 use std::time::Duration;
 
 pub struct AudioEngine<T: DspCallBack, R: ErrorCallback> {
@@ -47,7 +47,7 @@ impl<T: DspCallBack, R: ErrorCallback> AudioEngine<T, R> {
         AudioEngine {
             signal_tx: None,
             is_playing: Arc::new(AtomicBool::new(false)),
-            error_callback: error_callback,
+            error_callback,
             supervisor_handle: None,
             instrument: Arc::new(instrument),
             feature_extractor: Some(feature_extractor),
@@ -71,11 +71,11 @@ impl<T: DspCallBack, R: ErrorCallback> AudioEngine<T, R> {
         // Build initial stream. If this fails, return Err immediately to caller
         let (initial_stream, initial_config, consumer) = Self::build_stream(&tx)?;
 
-        let insturment = Arc::clone(&self.instrument);
+        let instrument = Arc::clone(&self.instrument);
 
         self.signal_tx = Some(tx.clone());
         self.is_playing.store(true, Ordering::Relaxed);
-        let is_playing = Arc::clone(&self.is_playing); // Acts as a drop guard, notifys when dropped
+        let is_playing = Arc::clone(&self.is_playing); // Acts as a drop guard, notifies when dropped
         let error_callback = Arc::clone(&self.error_callback);
 
         let mut feature_extractor = self
@@ -92,8 +92,8 @@ impl<T: DspCallBack, R: ErrorCallback> AudioEngine<T, R> {
             let mut config: Option<StreamConfig> = Some(initial_config);
             let mut frame = [0.0f32; FRAME_SIZE];
             let mut irr_filter_inst: Option<BandPassFilter> = Some(BandPassFilter::new(
-                insturment.filter_range().hpf_cutoff_hz,
-                insturment.filter_range().harmonic_ceiling_hz,
+                instrument.filter_range().hpf_cutoff_hz,
+                instrument.filter_range().harmonic_ceiling_hz,
                 initial_config.sample_rate,
             ));
             let mut c: Option<HeapCons<f32>> = Some(consumer);
@@ -142,8 +142,8 @@ impl<T: DspCallBack, R: ErrorCallback> AudioEngine<T, R> {
                     match Self::build_stream(&tx) {
                         Ok((st, cf, cons)) => {
                             irr_filter_inst = Some(BandPassFilter::new(
-                                insturment.filter_range().hpf_cutoff_hz,
-                                insturment.filter_range().harmonic_ceiling_hz,
+                                instrument.filter_range().hpf_cutoff_hz,
+                                instrument.filter_range().harmonic_ceiling_hz,
                                 cf.sample_rate,
                             ));
                             config = Some(cf);
@@ -187,7 +187,7 @@ impl<T: DspCallBack, R: ErrorCallback> AudioEngine<T, R> {
                                 buffer: &frame,
                                 cfg,
                                 filter,
-                                instrument: &insturment,
+                                instrument: &instrument,
                                 mpm,
                             });
                         }

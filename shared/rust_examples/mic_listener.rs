@@ -37,6 +37,18 @@ impl DspCallBack for LiveVuCallback {
     }
 }
 
+struct ConsoleErrorCallback;
+
+impl ErrorCallback for ConsoleErrorCallback {
+    fn on_error(&self, msg: RustError) {
+        eprintln!("[Stream Error]: {}", msg);
+    }
+
+    fn on_complete(&self) {
+        println!("[Stream Complete]");
+    }
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("=======================================================");
     println!("       MeliorSonus CPAL Live Audio Capture Test        ");
@@ -56,7 +68,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     println!("\nInitializing AudioEngine with Instrument::Generic...");
-    let mut engine = AudioEngine::new(Instrument::Generic, LiveVuCallback);
+    let error_cb = Arc::new(ConsoleErrorCallback);
+    let mut engine = AudioEngine::new(Instrument::Generic, LiveVuCallback, error_cb);
 
     println!("Starting CPAL stream...");
     engine.play()?;
