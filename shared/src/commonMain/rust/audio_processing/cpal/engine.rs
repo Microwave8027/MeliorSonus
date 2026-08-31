@@ -4,58 +4,87 @@
  * Usage:
  * Call AudioEngine::new() to create a new audio engine
  * If there is a problem building the stream, the audio engine is_playing will become false and an error callback will fire.
- * Feature extractor is passed into the engine. Upon reset a new one will be created.
+ * The feature extractor state is tied to the build stream
  */
 
+use crate::audio_processing::PitchDetectorMode;
 use crate::audio_processing::dsp::{CallBackParameters, DspCallBack};
 use crate::audio_processing::instruments::instrument::Instrument;
-use crate::audio_processing::processing::functions::high_pass_filter::BandPassFilter;
-use crate::audio_processing::processing::functions::mpm::MPM;
+use crate::audio_processing::processing::functions::filters::band_pass_filter::BandPassFilter;
+use crate::audio_processing::processing::functions::pitch::mpm::MPM;
 use crate::constants::*;
+use crate::prelude::*;
 use crate::utils::error_callback::ErrorCallback;
-use crate::utils::errors::RustError;
+use crate::utils::errors::{AudioEngineError, RustError};
 use crate::utils::guard::DropGuard;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleFormat, Stream, StreamConfig};
-use ringbuf::traits::*;
-use ringbuf::{HeapCons, HeapRb};
+use rtrb::{Consumer, Producer, RingBuffer};
 use std::error::Error;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, TryRecvError};
-use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 
-pub struct AudioEngine<T: DspCallBack, R: ErrorCallback> {
+pub struct AudioEngine<R: ErrorCallback> {
     signal_tx: Option<mpsc::Sender<EngineSignal>>,
     pub is_playing: Arc<AtomicBool>,
     error_callback: Arc<R>,
     supervisor_handle: Option<thread::JoinHandle<()>>,
     instrument: Arc<Instrument>,
-    feature_extractor: Option<T>,
+    rt_rb_prod: Option<Producer<Notes>>, //used for notes not buffers
+    silence_threshold: f32,
+    pitch_detector_mode: PitchDetectorMode,
+    device: HardwareDelegate,
+    pub audio_device_name: Option<String>,
 }
 
 enum EngineSignal {
     Paused,
     Playing,
     Closed,
+    SwitchDevice { device_name: Option<String> },
     Error { message: String }, // This type of error is always retryable
 }
 
-impl<T: DspCallBack, R: ErrorCallback> AudioEngine<T, R> {
-    pub fn new(instrument: Instrument, feature_extractor: T, error_callback: Arc<R>) -> Self {
+impl<R: ErrorCallback> AudioEngine<R> {
+    pub fn new(
+        instrument: Instrument,
+        error_callback: Arc<R>,
+        rtrb_prod: Producer<Notes>,
+        silence_threshold: f32,
+        pitch_detector_mode: PitchDetectorMode,
+        device: HardwareDelegate,
+    ) -> Self {
         AudioEngine {
             signal_tx: None,
             is_playing: Arc::new(AtomicBool::new(false)),
             error_callback,
             supervisor_handle: None,
             instrument: Arc::new(instrument),
-            feature_extractor: Some(feature_extractor),
+            rt_rb_prod: Some(rtrb_prod),
+            silence_threshold,
+            pitch_detector_mode: pitch_detector_mode,
+            device,
+            audio_device_name: None,
         }
     }
 
-    pub fn play(&mut self) -> Result<(), Box<dyn Error>> {
-        if self.is_playing.load(Ordering::Relaxed) || self.feature_extractor.is_none() {
+    pub fn set_audio_device(&mut self, device_name: Option<String>) {
+        self.audio_device_name = device_name.clone();
+        if let Some(tx) = &self.signal_tx {
+            let _ = tx.send(EngineSignal::SwitchDevice { device_name });
+        }
+    }
+
+    pub fn with_audio_device(mut self, device_name: Option<String>) -> Self {
+        self.audio_device_name = device_name;
+        self
+    }
+
+    pub fn play<T: DspCallBack>(&mut self) -> Result<(), Box<dyn Error>> {
+        if self.is_playing.load(Ordering::Relaxed) {
             return Err("Reset Audio Engine and read errors before playing again".into());
         }
         // Checks if the thread is already running
@@ -68,8 +97,10 @@ impl<T: DspCallBack, R: ErrorCallback> AudioEngine<T, R> {
         }
 
         let (tx, rx) = mpsc::channel();
+        let target_device_name = self.audio_device_name.clone();
         // Build initial stream. If this fails, return Err immediately to caller
-        let (initial_stream, initial_config, consumer) = Self::build_stream(&tx)?;
+        let (initial_stream, initial_config, consumer) =
+            Self::build_stream(&tx, target_device_name.as_deref())?;
 
         let instrument = Arc::clone(&self.instrument);
 
@@ -77,14 +108,18 @@ impl<T: DspCallBack, R: ErrorCallback> AudioEngine<T, R> {
         self.is_playing.store(true, Ordering::Relaxed);
         let is_playing = Arc::clone(&self.is_playing); // Acts as a drop guard, notifies when dropped
         let error_callback = Arc::clone(&self.error_callback);
+        let threshold = self.silence_threshold;
+        let mode = self.pitch_detector_mode.clone();
+        let device = self.device.clone();
 
-        let mut feature_extractor = self
-            .feature_extractor
+        let rb_prod = self
+            .rt_rb_prod
             .take()
-            .expect("Feature extractor should be present");
+            .expect("ring buffer producer should be present");
 
         let handle = thread::spawn(move || {
             let _guard = DropGuard::from(is_playing);
+            let mut target_device_name = target_device_name;
             let mut stream: Option<Stream> = Some(initial_stream);
             let mut is_paused = false;
 
@@ -96,8 +131,21 @@ impl<T: DspCallBack, R: ErrorCallback> AudioEngine<T, R> {
                 instrument.filter_range().harmonic_ceiling_hz,
                 initial_config.sample_rate,
             ));
-            let mut c: Option<HeapCons<f32>> = Some(consumer);
+            let mut c: Option<Consumer<f32>> = Some(consumer);
             let mut mpm: Option<MPM> = Some(MPM::new(FRAME_SIZE / 2));
+            let mut feature_extractor: Option<T> = match T::new(
+                rb_prod,
+                config.as_ref().unwrap().sample_rate,
+                threshold,
+                mode,
+                device,
+            ) {
+                Ok(v) => Some(v),
+                Err(err) => {
+                    error_callback.on_error(RustError::FeatureExtactorBuildError(err.to_string()));
+                    return;
+                }
+            };
 
             'supervisor: loop {
                 // Drain and handle all pending engine control signals
@@ -105,8 +153,19 @@ impl<T: DspCallBack, R: ErrorCallback> AudioEngine<T, R> {
                     match rx.try_recv() {
                         Ok(msg) => match msg {
                             EngineSignal::Closed => break 'supervisor,
+                            EngineSignal::SwitchDevice { device_name } => {
+                                log::info!("Switching audio input device to: {:?}", device_name);
+                                target_device_name = device_name;
+                                stream = None;
+                                config = None;
+                                c = None;
+                                continue 'supervisor;
+                            }
                             EngineSignal::Error { message } => {
                                 log::error!("Stream error: {}", message);
+                                error_callback.on_error(RustError::AudioEngineError(
+                                    AudioEngineError::StreamBuildError(message),
+                                ));
                                 stream = None;
                                 config = None;
                                 c = None;
@@ -139,7 +198,7 @@ impl<T: DspCallBack, R: ErrorCallback> AudioEngine<T, R> {
 
                 // Rebuilds the stream if it was destroyed by a runtime error
                 if stream.is_none() {
-                    match Self::build_stream(&tx) {
+                    match Self::build_stream(&tx, target_device_name.as_deref()) {
                         Ok((st, cf, cons)) => {
                             irr_filter_inst = Some(BandPassFilter::new(
                                 instrument.filter_range().hpf_cutoff_hz,
@@ -153,48 +212,58 @@ impl<T: DspCallBack, R: ErrorCallback> AudioEngine<T, R> {
                         }
                         Err(e) => {
                             log::error!("Stream build failed: {}", e);
-                            error_callback.on_error(RustError::StreamBuildError(e.to_string()));
+                            error_callback.on_error(RustError::AudioEngineError(
+                                AudioEngineError::StreamBuildError(e.to_string()),
+                            ));
                             break 'supervisor;
                         }
                     }
                 }
 
                 // DSP part
-                if let (Some(_), Some(cfg), Some(cons)) = (&stream, &config, &mut c) {
+                if let (Some(_), Some(cfg), Some(cons), Some(fe)) =
+                    (&stream, &config, &mut c, &mut feature_extractor)
+                {
                     let mut processed = false;
 
                     const NEAR_BUFFER_OVERFILL: usize = RINGBUF_CAPACITY - FRAME_SIZE;
-                    if cons.occupied_len() >= NEAR_BUFFER_OVERFILL {
-                        let excess = cons.occupied_len() - FRAME_SIZE;
-                        cons.skip(excess);
-                        error_callback.on_error(RustError::BufferOverfill);
-                        break 'supervisor;
+                    let occupied = cons.slots();
+                    if occupied >= NEAR_BUFFER_OVERFILL {
+                        let excess = occupied - FRAME_SIZE;
+                        if let Ok(chunk) = cons.read_chunk(excess) {
+                            chunk.commit_all();
+                        }
+                        error_callback.on_error(RustError::AudioEngineError(
+                            AudioEngineError::BufferOverfill,
+                        ));
                     }
 
-                    if cons.occupied_len() >= FRAME_SIZE {
-                        let (first, second) = cons.as_slices();
-                        if first.len() >= FRAME_SIZE {
-                            frame.copy_from_slice(&first[..FRAME_SIZE]);
-                        } else {
-                            let first_len = first.len();
-                            frame[..first_len].copy_from_slice(first);
-                            frame[first_len..FRAME_SIZE]
-                                .copy_from_slice(&second[..FRAME_SIZE - first_len]);
+                    if cons.slots() >= FRAME_SIZE {
+                        if let Ok(chunk) = cons.read_chunk(FRAME_SIZE) {
+                            let (first, second) = chunk.as_slices();
+                            if first.len() >= FRAME_SIZE {
+                                frame.copy_from_slice(&first[..FRAME_SIZE]);
+                            } else {
+                                let first_len = first.len();
+                                frame[..first_len].copy_from_slice(first);
+                                frame[first_len..FRAME_SIZE]
+                                    .copy_from_slice(&second[..FRAME_SIZE - first_len]);
+                            }
+
+                            if let (Some(filter), Some(mpm)) = (&mut irr_filter_inst, &mut mpm) {
+                                fe.dsp_callback(CallBackParameters {
+                                    buffer: &frame,
+                                    cfg,
+                                    filter,
+                                    instrument: &instrument,
+                                    mpm,
+                                });
+                            }
+
+                            processed = true;
+
+                            chunk.commit(HOP_SIZE);
                         }
-
-                        if let (Some(filter), Some(mpm)) = (&mut irr_filter_inst, &mut mpm) {
-                            feature_extractor.dsp_callback(CallBackParameters {
-                                buffer: &frame,
-                                cfg,
-                                filter,
-                                instrument: &instrument,
-                                mpm,
-                            });
-                        }
-
-                        processed = true;
-
-                        cons.skip(HOP_SIZE);
                     }
 
                     if !processed {
@@ -208,11 +277,92 @@ impl<T: DspCallBack, R: ErrorCallback> AudioEngine<T, R> {
         Ok(())
     }
 
+    pub fn get_device_name(device: &cpal::Device) -> String {
+        if let Ok(desc) = device.description() {
+            desc.name().to_string()
+        } else {
+            format!("{:?}", device.id())
+        }
+    }
+
+    pub fn list_input_devices() -> Result<Vec<(usize, String, bool)>, Box<dyn Error>> {
+        let host = cpal::default_host();
+        let default_name = host
+            .default_input_device()
+            .map(|d| Self::get_device_name(&d));
+        let devices = host.input_devices()?;
+        let mut list = Vec::new();
+        for (i, dev) in devices.enumerate() {
+            let name = Self::get_device_name(&dev);
+            let is_default = default_name.as_ref().map_or(false, |dn| dn == &name);
+            list.push((i, name, is_default));
+        }
+        Ok(list)
+    }
+
+    pub fn find_input_device(
+        host: &cpal::Host,
+        target: &str,
+    ) -> Result<cpal::Device, Box<dyn Error>> {
+        if target.eq_ignore_ascii_case("default") {
+            return host
+                .default_input_device()
+                .ok_or_else(|| "No default microphone/input device found".into());
+        }
+
+        let devices = host.input_devices()?.collect::<Vec<_>>();
+
+        if let Ok(idx) = target.parse::<usize>() {
+            if let Some(dev) = devices.get(idx) {
+                return Ok(dev.clone());
+            }
+        }
+
+        for dev in &devices {
+            let name = Self::get_device_name(dev);
+            if name.eq_ignore_ascii_case(target) {
+                return Ok(dev.clone());
+            }
+        }
+
+        let target_lower = target.to_lowercase();
+        for dev in &devices {
+            let name = Self::get_device_name(dev);
+            if name.to_lowercase().contains(&target_lower) {
+                return Ok(dev.clone());
+            }
+        }
+
+        let available = devices
+            .iter()
+            .enumerate()
+            .map(|(i, d)| format!("  [{}] {}", i, Self::get_device_name(d)))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        Err(format!(
+            "Input device '{}' not found.\nAvailable input devices:\n{}",
+            target, available
+        )
+        .into())
+    }
+
     fn build_stream(
         signal_tx: &mpsc::Sender<EngineSignal>,
-    ) -> Result<(Stream, StreamConfig, HeapCons<f32>), Box<dyn Error>> {
+        device_name: Option<&str>,
+    ) -> Result<(Stream, StreamConfig, Consumer<f32>), Box<dyn Error>> {
         let host = cpal::default_host();
-        let device = host.default_input_device().ok_or("No mic")?;
+        let device = match device_name {
+            Some(target) => Self::find_input_device(&host, target)?,
+            None => host
+                .default_input_device()
+                .ok_or_else(|| "No default audio input device found".to_string())?,
+        };
+
+        log::info!(
+            "Selected audio input device: '{}'",
+            Self::get_device_name(&device)
+        );
 
         let supported_configs = device.supported_input_configs()?.collect::<Vec<_>>();
 
@@ -220,7 +370,15 @@ impl<T: DspCallBack, R: ErrorCallback> AudioEngine<T, R> {
         let mut selected_format: Option<SampleFormat> = None;
         let mut selected_config: Option<StreamConfig> = None;
 
-        'outer: for &target_format in &[SampleFormat::F32, SampleFormat::I32, SampleFormat::I16] {
+        let formats = [
+            SampleFormat::F32,
+            SampleFormat::I32,
+            SampleFormat::I16,
+            SampleFormat::U16,
+        ];
+
+        // 1. Pass 1: Try preferred sample rate with mono or stereo
+        'pass1: for &target_format in &formats {
             for range in &supported_configs {
                 if range.sample_format() == target_format
                     && (range.channels() == 1 || range.channels() == 2)
@@ -236,8 +394,51 @@ impl<T: DspCallBack, R: ErrorCallback> AudioEngine<T, R> {
                                 sample_rate: rate,
                                 buffer_size: cpal::BufferSize::Default,
                             });
-                            break 'outer;
+                            break 'pass1;
                         }
+                    }
+                }
+            }
+        }
+
+        // 2. Pass 2: If no 1/2 channel found with preferred rates, try any channel count with preferred rates
+        if selected_config.is_none() {
+            'pass2: for &target_format in &formats {
+                for range in &supported_configs {
+                    if range.sample_format() == target_format {
+                        let min_rate = range.min_sample_rate();
+                        let max_rate = range.max_sample_rate();
+
+                        for &rate in &preferred_rates {
+                            if rate >= min_rate && rate <= max_rate {
+                                selected_format = Some(target_format);
+                                selected_config = Some(StreamConfig {
+                                    channels: range.channels(),
+                                    sample_rate: rate,
+                                    buffer_size: cpal::BufferSize::Default,
+                                });
+                                break 'pass2;
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // 3. Pass 3: Try 1 or 2 channels with any supported sample rate
+        if selected_config.is_none() {
+            'pass3: for &target_format in &formats {
+                for range in &supported_configs {
+                    if range.sample_format() == target_format
+                        && (range.channels() == 1 || range.channels() == 2)
+                    {
+                        selected_format = Some(target_format);
+                        selected_config = Some(StreamConfig {
+                            channels: range.channels(),
+                            sample_rate: range.max_sample_rate(),
+                            buffer_size: cpal::BufferSize::Default,
+                        });
+                        break 'pass3;
                     }
                 }
             }
@@ -265,8 +466,7 @@ impl<T: DspCallBack, R: ErrorCallback> AudioEngine<T, R> {
                 message: err.to_string(),
             });
         };
-        let rb = HeapRb::<f32>::new(RINGBUF_CAPACITY);
-        let (mut prod, cons) = rb.split();
+        let (mut prod, cons) = RingBuffer::<f32>::new(RINGBUF_CAPACITY);
 
         let channels = config.channels;
         let stream = match sample_format {
@@ -274,14 +474,22 @@ impl<T: DspCallBack, R: ErrorCallback> AudioEngine<T, R> {
                 config,
                 move |data: &[f32], _: &cpal::InputCallbackInfo| match channels {
                     1 => {
-                        let _ = prod.push_slice(data);
+                        for &s in data {
+                            let _ = prod.push(s);
+                        }
                     }
                     2 => {
-                        let _ = prod.push_iter(data.chunks_exact(2).map(|c| (c[0] + c[1]) * 0.5));
+                        for c in data.chunks_exact(2) {
+                            let _ = prod.push((c[0] + c[1]) * 0.5);
+                        }
                     }
                     _ => {
                         let ch = channels as usize;
-                        let _ = prod.push_iter(data.chunks_exact(ch).map(|c| c[0]));
+                        let inv_ch = 1.0 / ch as f32;
+                        for c in data.chunks_exact(ch) {
+                            let sum: f32 = c.iter().sum();
+                            let _ = prod.push(sum * inv_ch);
+                        }
                     }
                 },
                 err_fn,
@@ -293,18 +501,22 @@ impl<T: DspCallBack, R: ErrorCallback> AudioEngine<T, R> {
                     const NORM: f32 = 1.0 / 2147483648.0;
                     match channels {
                         1 => {
-                            let _ = prod.push_iter(data.iter().map(|&s| s as f32 * NORM));
+                            for &s in data {
+                                let _ = prod.push(s as f32 * NORM);
+                            }
                         }
                         2 => {
-                            let _ = prod.push_iter(
-                                data.chunks_exact(2)
-                                    .map(|c| (c[0] as f32 + c[1] as f32) * (0.5 * NORM)),
-                            );
+                            for c in data.chunks_exact(2) {
+                                let _ = prod.push((c[0] as f32 + c[1] as f32) * (0.5 * NORM));
+                            }
                         }
                         _ => {
                             let ch = channels as usize;
-                            let _ =
-                                prod.push_iter(data.chunks_exact(ch).map(|c| c[0] as f32 * NORM));
+                            let inv_ch = NORM / ch as f32;
+                            for c in data.chunks_exact(ch) {
+                                let sum: f32 = c.iter().map(|&x| x as f32).sum();
+                                let _ = prod.push(sum * inv_ch);
+                            }
                         }
                     }
                 },
@@ -317,18 +529,52 @@ impl<T: DspCallBack, R: ErrorCallback> AudioEngine<T, R> {
                     const NORM: f32 = 1.0 / 32768.0;
                     match channels {
                         1 => {
-                            let _ = prod.push_iter(data.iter().map(|&s| s as f32 * NORM));
+                            for &s in data {
+                                let _ = prod.push(s as f32 * NORM);
+                            }
                         }
                         2 => {
-                            let _ = prod.push_iter(
-                                data.chunks_exact(2)
-                                    .map(|c| (c[0] as f32 + c[1] as f32) * (0.5 * NORM)),
-                            );
+                            for c in data.chunks_exact(2) {
+                                let _ = prod.push((c[0] as f32 + c[1] as f32) * (0.5 * NORM));
+                            }
                         }
                         _ => {
                             let ch = channels as usize;
-                            let _ =
-                                prod.push_iter(data.chunks_exact(ch).map(|c| c[0] as f32 * NORM));
+                            let inv_ch = NORM / ch as f32;
+                            for c in data.chunks_exact(ch) {
+                                let sum: f32 = c.iter().map(|&x| x as f32).sum();
+                                let _ = prod.push(sum * inv_ch);
+                            }
+                        }
+                    }
+                },
+                err_fn,
+                None,
+            )?,
+            SampleFormat::U16 => device.build_input_stream(
+                config,
+                move |data: &[u16], _: &cpal::InputCallbackInfo| {
+                    const NORM: f32 = 1.0 / 32768.0;
+                    match channels {
+                        1 => {
+                            for &s in data {
+                                let _ = prod.push((s as f32 - 32768.0) * NORM);
+                            }
+                        }
+                        2 => {
+                            for c in data.chunks_exact(2) {
+                                let s0 = (c[0] as f32 - 32768.0) * NORM;
+                                let s1 = (c[1] as f32 - 32768.0) * NORM;
+                                let _ = prod.push((s0 + s1) * 0.5);
+                            }
+                        }
+                        _ => {
+                            let ch = channels as usize;
+                            let inv_ch = NORM / ch as f32;
+                            for c in data.chunks_exact(ch) {
+                                let sum: f32 = c.iter().map(|&x| x as f32 - 32768.0).sum();
+                                let _ = prod.push(sum * inv_ch);
+                            }
                         }
                     }
                 },
@@ -345,12 +591,12 @@ impl<T: DspCallBack, R: ErrorCallback> AudioEngine<T, R> {
         Ok((stream, config, cons))
     }
 
-    pub fn reset(&mut self, feature_extractor: T) {
+    pub fn reset(&mut self, rtrb_prod: Producer<Notes>) {
         self.end();
         self.signal_tx = None;
         self.is_playing.store(false, Ordering::Relaxed);
         self.supervisor_handle = None;
-        self.feature_extractor = Some(feature_extractor);
+        self.rt_rb_prod = Some(rtrb_prod);
     }
 
     pub fn pause(&mut self) -> Result<(), Box<dyn Error>> {
@@ -383,7 +629,7 @@ impl<T: DspCallBack, R: ErrorCallback> AudioEngine<T, R> {
     }
 }
 
-impl<T: DspCallBack, R: ErrorCallback> Drop for AudioEngine<T, R> {
+impl<R: ErrorCallback> Drop for AudioEngine<R> {
     fn drop(&mut self) {
         self.end()
     }

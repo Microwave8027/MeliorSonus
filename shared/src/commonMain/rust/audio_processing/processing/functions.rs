@@ -1,11 +1,13 @@
-pub mod harmonic_sieve_mask;
-pub mod high_pass_filter;
-pub mod mpm;
-pub mod nsdf;
-pub mod rms_dbfs;
+pub mod articulation;
+pub mod filters;
+pub mod pitch;
+pub mod resampling;
+pub mod spectral;
+pub mod time_domain;
 
-pub use harmonic_sieve_mask::*;
-pub use high_pass_filter::*;
-pub use mpm::*;
-pub use nsdf::*;
-pub use rms_dbfs::*;
+pub use articulation::*;
+pub use filters::*;
+pub use pitch::*;
+pub use resampling::*;
+pub use spectral::*;
+pub use time_domain::*;

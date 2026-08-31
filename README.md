@@ -12,6 +12,10 @@ This is a Kotlin Multiplatform project targeting Android, iOS, Web, Desktop (JVM
     Similarly, if you want to edit the Desktop (JVM) specific part, the [jvmMain](./shared/src/jvmMain/kotlin)
     folder is the appropriate location.
 
+## Rust Workflows & DSP Engine
+
+For instructions on running Cargo tests, Clippy linter, and real-time DSP microphone examples from the root, see [RUST_WORKFLOWS.md](./RUST_WORKFLOWS.md).
+
 ## Current Progress
 
 Check out the TODO.md for more details on current progress. Rust is currently implemented via uniffi bindings but I have not written any. Will focus on writing everything inside of rust in order to avoid

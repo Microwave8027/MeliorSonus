@@ -1,19 +1,37 @@
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq, uniffi::Error)]
-#[uniffi(flat_error)]
 pub enum RustError {
+    AudioEngineError(AudioEngineError),
+    NotImplementedError(String),
+    FeatureExtactorBuildError(String),
+    Custom(String),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, uniffi::Enum)]
+pub enum AudioEngineError {
     StreamBuildError(String),
     BufferOverfill,
-    Custom(String),
 }
 
 impl fmt::Display for RustError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Custom(msg) => write!(f, "{msg}"),
-            Self::BufferOverfill => write!(f, "Audio Buffer Overfilled!"),
-            Self::StreamBuildError(msg) => write!(f, "Stream Build Error: {msg}"),
+            Self::AudioEngineError(err) => match err {
+                AudioEngineError::BufferOverfill => {
+                    write!(f, "Audio Buffer Overfilled, please reset")
+                }
+                AudioEngineError::StreamBuildError(msg) => {
+                    write!(f, "Stream build failed: {msg}")
+                }
+            },
+            Self::FeatureExtactorBuildError(msg) => {
+                write!(f, "Extractor Build Exception: {msg}")
+            }
+            Self::NotImplementedError(msg) => {
+                write!(f, "Feature is not implemented: {msg}")
+            }
         }
     }
 }
