@@ -62,8 +62,8 @@ fn test_hybrid_feature_extractor_audio_engine_direct_integration() {
         panic!("Expected Notes::Start");
     }
 
-    // Send silence frames to trigger release (2 hops to clear 1024-sample sliding window)
-    for _ in 0..2 {
+    // Send silence frames to trigger release (clear 1024-sample sliding window and release hangover)
+    for _ in 0..4 {
         hybrid.dsp_callback(CallBackParameters {
             buffer: &silent_frame,
             cfg: &cfg,

@@ -131,7 +131,7 @@ fn run_consumer_outputter(
         }
 
         // 2. Render live telemetry bar
-        if last_ui_refresh.elapsed() >= refresh_interval {
+        /*if last_ui_refresh.elapsed() >= refresh_interval {
             last_ui_refresh = Instant::now();
             let dbfs = metrics.rms_dbfs();
             let freq = metrics.mpm_freq();
@@ -150,7 +150,7 @@ fn run_consumer_outputter(
                 frames
             );
             let _ = io::stdout().flush();
-        }
+        }*/
 
         thread::sleep(Duration::from_millis(10));
     }

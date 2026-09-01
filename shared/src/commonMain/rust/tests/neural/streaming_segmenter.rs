@@ -40,10 +40,10 @@ fn test_streaming_segmenter_monophonic_lifecycle() {
     );
     assert!(event2.is_empty());
 
-    // 3. Restrike via HFC onset at confirmed ts = 1065 (detected at frame ts = 1100) -> Emits EndNote (old) and StartNote (new)
+    // 3. Restrike via HFC onset at confirmed ts = 1090 (detected at frame ts = 1100, 90ms >= 80ms restrike debounce) -> Emits EndNote (old) and StartNote (new)
     let event3 = segmenter.process_mpm_frame(
         (440.0, 0.95, -10.0),
-        Some(1065), // Confirmed candidate onset timestamp!
+        Some(1090), // Confirmed candidate onset timestamp!
         1100,
         14.0,
         -60.0,
@@ -55,7 +55,7 @@ fn test_streaming_segmenter_monophonic_lifecycle() {
         SegmentedNoteEvent::End(e) => {
             assert_eq!(e.pitch, Pitch::A);
             assert_eq!(e.note_striked, 1000);
-            assert!((e.note_duration - 0.065).abs() < 0.001);
+            assert!((e.note_duration - 0.090).abs() < 0.001);
         }
         _ => panic!("Expected EndNote on restrike"),
     }
@@ -63,7 +63,7 @@ fn test_streaming_segmenter_monophonic_lifecycle() {
         SegmentedNoteEvent::Start(s) => {
             assert_eq!(s.pitch, Pitch::A);
             assert_eq!(s.octave, Octave::O4);
-            assert_eq!(s.note_striked, 1065);
+            assert_eq!(s.note_striked, 1090);
         }
         _ => panic!("Expected StartNote on restrike"),
     }
@@ -83,8 +83,8 @@ fn test_streaming_segmenter_monophonic_lifecycle() {
         SegmentedNoteEvent::End(e) => {
             assert_eq!(e.pitch, Pitch::A);
             assert_eq!(e.octave, Octave::O4);
-            assert_eq!(e.note_striked, 1065);
-            assert!((e.note_duration - 0.135).abs() < 0.001);
+            assert_eq!(e.note_striked, 1090);
+            assert!((e.note_duration - 0.110).abs() < 0.001);
         }
         _ => panic!("Expected EndNote on release"),
     }

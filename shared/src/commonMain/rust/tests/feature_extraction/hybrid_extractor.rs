@@ -52,8 +52,8 @@ fn test_hybrid_feature_extractor_pipeline_live() {
     assert_eq!(event1.octave(), Octave::O4);
     assert!(event1.is_start());
 
-    // 2. Process silence frames to finalize note (2 hops to clear 1024-sample sliding window)
-    for _ in 0..2 {
+    // 2. Process silence frames to finalize note (clear 1024-sample sliding window and release hangover)
+    for _ in 0..4 {
         hybrid.dsp_callback(CallBackParameters {
             buffer: &silent_frame,
             cfg: &cfg,
@@ -110,8 +110,8 @@ fn test_hybrid_feature_extractor_full_lifecycle() {
     assert_eq!(start_note.pitch(), Pitch::A);
     assert_eq!(start_note.octave(), Octave::O4);
 
-    // 2. Silence triggers finalize_all / note end (2 hops to clear 1024-sample sliding window)
-    for _ in 0..2 {
+    // 2. Silence triggers finalize_all / note end (clear 1024-sample sliding window and release hangover)
+    for _ in 0..4 {
         extractor.dsp_callback(CallBackParameters {
             buffer: &silent_frame,
             cfg: &cfg,

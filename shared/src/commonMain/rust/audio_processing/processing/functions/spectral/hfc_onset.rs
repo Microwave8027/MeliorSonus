@@ -1,7 +1,7 @@
 pub const ONSET_WINDOW_SIZE: usize = 7;
-pub const DEFAULT_HFC_THRESHOLD: f32 = 1.8;
+pub const DEFAULT_HFC_THRESHOLD: f32 = 2.2;
 pub const DEFAULT_SILENCE_THRESHOLD_DBFS: f32 = -45.0;
-pub const DEFAULT_MIN_IOI_MS: u128 = 45; // 45ms debounce prevents double-triggers
+pub const DEFAULT_MIN_IOI_MS: u128 = 60; // 60ms debounce prevents mechanical strike double-triggers
 
 /// Computes the High-Frequency Content (HFC) of an FFT magnitude spectrum.
 ///
