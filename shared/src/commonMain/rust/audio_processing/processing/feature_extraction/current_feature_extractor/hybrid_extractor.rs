@@ -210,6 +210,7 @@ impl HybridFeatureExtractor {
                 sub_thump_dbfs,
                 spectral_centroid,
                 profile,
+                filtered_frame,
             );
 
             for event in events {
@@ -247,7 +248,7 @@ impl DspCallBack for HybridFeatureExtractor {
                 device,
             )?));
         }
-        let segmenter = StreamingNoteSegmenter::new(ONSET_THRESHOLD, FRAME_THRESHOLD);
+        let segmenter = StreamingNoteSegmenter::new(ONSET_THRESHOLD, FRAME_THRESHOLD, sample_rate);
 
         Ok(Self {
             sample_rate,

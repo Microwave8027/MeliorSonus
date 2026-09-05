@@ -102,8 +102,15 @@ fn run_consumer_outputter(
             match note {
                 Notes::Start(s) => {
                     println!(
-                        " \x1b[1;32m▶ NOTE START\x1b[0m: {:?} {:?} | Vel: {:3} | Dyn: {:?} | Level: {:5.1} dBFS (ts: {} ms)",
-                        s.pitch, s.octave, s.velocity, s.dynamic, s.loudness_dbfs, s.note_striked
+                        "NOTE START: {:?} {:?} | Vel: {:3} | Dyn: {:?} | Level: {:5.1} dBFS (ts: {} ms) | Phons: {:?} | Sones: {:?}",
+                        s.pitch,
+                        s.octave,
+                        s.velocity,
+                        s.dynamic,
+                        s.loudness_dbfs,
+                        s.note_striked,
+                        s.phons.unwrap_or(0.0),
+                        s.sones.unwrap_or(0.0)
                     );
                 }
                 Notes::End(e) => {
@@ -115,7 +122,7 @@ fn run_consumer_outputter(
                         format!("{:2}c (In Tune)", e.avg_cents_offset)
                     };
                     println!(
-                        " \x1b[1;31m■ NOTE END\x1b[0m:   {:?} {:?} | Dur: {:5.2}s | Artic: {:?} | Pitch: {} | Damp: {:?} | Level: {:5.1} dBFS (ts: {} ms)",
+                        "NOTE END: {:?} {:?} | Dur: {:5.2}s | Artic: {:?} | Pitch: {} | Damp: {:?} | Level: {:5.1} dBFS (ts: {} ms) | Avg Phons: {:?} | Avg Sones: {:?} | Peak Phons: {:?} | Peak Sones: {:?} ",
                         e.pitch,
                         e.octave,
                         e.note_duration,
@@ -123,7 +130,11 @@ fn run_consumer_outputter(
                         cents_str,
                         e.damping,
                         e.loudness_dbfs,
-                        e.note_striked
+                        e.note_striked,
+                        e.avg_phons,
+                        e.avg_sones,
+                        e.peak_phons,
+                        e.peak_sones,
                     );
                 }
             }
@@ -131,7 +142,7 @@ fn run_consumer_outputter(
         }
 
         // 2. Render live telemetry bar
-        /*if last_ui_refresh.elapsed() >= refresh_interval {
+        if last_ui_refresh.elapsed() >= refresh_interval {
             last_ui_refresh = Instant::now();
             let dbfs = metrics.rms_dbfs();
             let freq = metrics.mpm_freq();
@@ -150,7 +161,7 @@ fn run_consumer_outputter(
                 frames
             );
             let _ = io::stdout().flush();
-        }*/
+        }
 
         thread::sleep(Duration::from_millis(10));
     }
@@ -332,9 +343,7 @@ fn parse_cli_args() -> CliConfig {
 fn print_help() {
     println!(
         r#"
-================================================================================
   MeliorSonus Real-Time Microphone DSP Listener & Pedagogical Analyzer
-================================================================================
 
 USAGE:
     cargo run --example mic_listener -- [OPTIONS] [DEVICE] [INSTRUMENT] [THRESHOLD]
@@ -389,6 +398,7 @@ fn print_available_devices() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    enable_flush_to_zero();
     let config = parse_cli_args();
 
     if config.show_help {

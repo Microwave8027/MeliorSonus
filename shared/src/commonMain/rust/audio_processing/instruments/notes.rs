@@ -2,18 +2,19 @@ use super::instrument::{Instrument, InstrumentAcousticProfile};
 use crate::audio_processing::processing::functions::articulation::articulation_classifier::{
     classify_articulation, classify_damping, detect_mashed_key,
 };
+use crate::audio_processing::processing::functions::spectral::sones_to_phons;
 
-/// Dynamic classification level based on acoustic decibels relative to full scale.
+/// Dynamic classification level based on acoustic decibels relative to full scale or perceived loudness level in Phons.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DynamicLevel {
-    Pianississimo, // ppp (< -45 dBFS)
-    Pianissimo,    // pp  (-45 to -38 dBFS)
-    Piano,         // p   (-38 to -30 dBFS)
-    MezzoPiano,    // mp  (-30 to -24 dBFS)
-    MezzoForte,    // mf  (-24 to -18 dBFS)
-    Forte,         // f   (-18 to -12 dBFS)
-    Fortissimo,    // ff  (-12 to -6 dBFS)
-    Fortississimo, // fff (> -6 dBFS)
+    Pianississimo, // ppp (< -45 dBFS / < 34 Phons)
+    Pianissimo,    // pp  (-45 to -38 dBFS / 34 to 42 Phons)
+    Piano,         // p   (-38 to -30 dBFS / 42 to 50 Phons)
+    MezzoPiano,    // mp  (-30 to -24 dBFS / 50 to 58 Phons)
+    MezzoForte,    // mf  (-24 to -18 dBFS / 58 to 66 Phons)
+    Forte,         // f   (-18 to -12 dBFS / 66 to 74 Phons)
+    Fortissimo,    // ff  (-12 to -6 dBFS / 74 to 82 Phons)
+    Fortississimo, // fff (> -6 dBFS / > 82 Phons)
 }
 
 impl DynamicLevel {
@@ -31,6 +32,26 @@ impl DynamicLevel {
         } else if dbfs < -12.0 {
             DynamicLevel::Forte
         } else if dbfs < -6.0 {
+            DynamicLevel::Fortissimo
+        } else {
+            DynamicLevel::Fortississimo
+        }
+    }
+
+    pub fn from_phons(phons: f32) -> Self {
+        if phons.is_nan() || phons < 34.0 {
+            DynamicLevel::Pianississimo
+        } else if phons < 42.0 {
+            DynamicLevel::Pianissimo
+        } else if phons < 50.0 {
+            DynamicLevel::Piano
+        } else if phons < 58.0 {
+            DynamicLevel::MezzoPiano
+        } else if phons < 66.0 {
+            DynamicLevel::MezzoForte
+        } else if phons < 74.0 {
+            DynamicLevel::Forte
+        } else if phons < 82.0 {
             DynamicLevel::Fortissimo
         } else {
             DynamicLevel::Fortississimo
@@ -65,6 +86,8 @@ pub fn calculate_midi_velocity(loudness_dbfs: f32, crest_factor: f32) -> u8 {
 /// * `octave: Octave` — Scientific pitch notation octave register (O_1 to O10, or OutOfRange). Range: `Octave` enum variants.
 /// * `tonality_offset: i8` — Initial intonation deviation in cents relative to equal temperament (A4 = 440 Hz). Range: `-50` to `+50` cents.
 /// * `loudness_dbfs: f32` — Attack/onset root-mean-square loudness in decibels relative to full scale. Range: `-120.0` to `0.0` dBFS.
+/// * Perceived linear attack loudness in Sones (None for monophonic MPM path)
+/// * Perceived linear attack loudness in Phons (None for monophonic MPM path)
 /// * `note_striked: u128` — Timestamp in epoch milliseconds when the initial note onset occurred. Range: `>= 0` ms.
 /// * `crest_factor: f32` — Ratio of peak amplitude to RMS energy in dB at attack (transient percussiveness). Range: `0.0` to `30.0+` dB.
 /// * `sub_thump_dbfs: f32` — Low-frequency energy (20–80 Hz) at strike time for keybed collision detection. Range: `-120.0` to `0.0` dBFS.
@@ -77,6 +100,8 @@ pub struct StartNote {
     pub octave: Octave,
     pub tonality_offset: i8,
     pub loudness_dbfs: f32,
+    pub sones: Option<f32>,
+    pub phons: Option<f32>,
     pub note_striked: u128,
     pub crest_factor: f32,
     pub sub_thump_dbfs: f32,
@@ -105,12 +130,16 @@ pub enum NoteArticulation {
 /// * `tonality_offset: i8` — Initial attack intonation deviation in cents. Range: `-50` to `+50` cents.
 /// * `avg_cents_offset: i8` — Average intonation deviation in cents across all sustained active frames. Range: `-50` to `+50` cents.
 /// * `loudness_dbfs: f32` — Peak sustained volume/energy reached during the note envelope. Range: `-120.0` to `0.0` dBFS.
+/// * `peak_sones: Option<f32>` — Peak sustained perceived loudness in Sones (None for MPM path).
+/// * `peak_phons: Option<f32>` — Peak sustained perceived loudness level in Phons (None for MPM path).
+/// * `avg_sones: Option<f32>` — Average sustained perceived loudness in Sones (None for MPM path).
+/// * `avg_phons: Option<f32>` — Average sustained perceived loudness level in Phons (None for MPM path).
 /// * `rise_duration: f32` — Duration in seconds from onset strike to peak loudness (attack phase). Range: `0.005` to `2.0+` seconds. IGNORE FOR PIANO
 /// * `attack_slope: f32` — Initial attack velocity steepness in dBFS per second. Range: `0.0` to `1000.0+` dBFS/s.
 /// * `note_duration: f32` — Total sounded note duration in seconds from initial strike to release. Range: `> 0.0` seconds.
 /// * `note_striked: u128` — Timestamp in epoch milliseconds when note onset originally occurred. Range: `>= 0` ms.
 /// * `articulation: NoteArticulation` — Pedagogical articulation classification (Normal, Staccato, Tenuto, Legato, Marcato). Range: `NoteArticulation` enum variants.
-/// * `is_mashed: bool` — Flag indicating whether the key was struck excessively hard with low-end thump impact. Range: `true` / `false`.\n/// * `is_flat: bool` — Flag indicating whether the sustained pitch average was below the instrument's flat intonation threshold. Range: `true` / `false`.
+/// * `is_mashed: bool` — Flag indicating whether the key was struck excessively hard with low-end thump impact. Range: `true` / `false`.
 /// * `is_flat: bool` — Flag indicating whether the sustained pitch average was below the instrument's flat intonation threshold. Range: `true` / `false`.
 /// * `spectral_centroid: f32` — Average spectral center-of-mass in Hertz (spectral brightness / timbral richness). Range: `0.0` to `Nyquist (SampleRate / 2)` Hz.
 /// * `mpm_clarity: Option<f32>` — McLeod Pitch Method normalized square difference (NSDF) periodicity confidence. Range: `Some(0.0..=1.0)` or `None`.
@@ -124,6 +153,10 @@ pub struct EndNote {
     pub tonality_offset: i8,
     pub avg_cents_offset: i8,
     pub loudness_dbfs: f32,
+    pub peak_sones: Option<f32>,
+    pub peak_phons: Option<f32>,
+    pub avg_sones: Option<f32>,
+    pub avg_phons: Option<f32>,
     pub rise_duration: f32,
     pub attack_slope: f32,
     pub note_duration: f32,
@@ -181,10 +214,59 @@ impl Notes {
         }
     }
 
+    pub fn tonality_offset(&self) -> i8 {
+        match self {
+            Notes::Start(s) => s.tonality_offset,
+            Notes::End(e) => e.avg_cents_offset,
+        }
+    }
+
     pub fn note_striked(&self) -> u128 {
         match self {
             Notes::Start(s) => s.note_striked,
             Notes::End(e) => e.note_striked,
+        }
+    }
+
+    /// Computes the fundamental frequency in Hz for this note event,
+    /// factoring in pitch class, octave register, and microtonal cent deviation.
+    pub fn frequency(&self) -> Option<f32> {
+        let (pitch, octave, cents) = match self {
+            Notes::Start(s) => (s.pitch, s.octave, s.tonality_offset),
+            Notes::End(e) => (e.pitch, e.octave, e.avg_cents_offset),
+        };
+        note_to_frequency(pitch, octave, cents)
+    }
+
+    /// Perceived linear loudness in Sones (attack loudness for Start, avg loudness for End).
+    pub fn loudness_sones(&self) -> Option<f32> {
+        match self {
+            Notes::Start(s) => s.sones,
+            Notes::End(e) => e.avg_sones,
+        }
+    }
+
+    /// Perceived loudness level in Phons (attack loudness level for Start, avg level for End).
+    pub fn loudness_phons(&self) -> Option<f32> {
+        match self {
+            Notes::Start(s) => s.phons,
+            Notes::End(e) => e.avg_phons,
+        }
+    }
+
+    /// Peak perceived linear loudness in Sones.
+    pub fn peak_sones(&self) -> Option<f32> {
+        match self {
+            Notes::Start(s) => s.sones,
+            Notes::End(e) => e.peak_sones,
+        }
+    }
+
+    /// Peak perceived loudness level in Phons.
+    pub fn peak_phons(&self) -> Option<f32> {
+        match self {
+            Notes::Start(s) => s.phons,
+            Notes::End(e) => e.peak_phons,
         }
     }
 }
@@ -205,11 +287,45 @@ impl EndNote {
     pub fn update_note_striked(&mut self, timestamp: u128) {
         self.note_striked = timestamp;
     }
+
+    /// Computes the fundamental frequency in Hz for this end note.
+    pub fn frequency(&self) -> Option<f32> {
+        note_to_frequency(self.pitch, self.octave, self.avg_cents_offset)
+    }
+
+    pub fn peak_sones(&self) -> Option<f32> {
+        self.peak_sones
+    }
+
+    pub fn peak_phons(&self) -> Option<f32> {
+        self.peak_phons
+    }
+
+    pub fn avg_sones(&self) -> Option<f32> {
+        self.avg_sones
+    }
+
+    pub fn avg_phons(&self) -> Option<f32> {
+        self.avg_phons
+    }
 }
 
 impl StartNote {
     pub fn update_note_striked(&mut self, timestamp: u128) {
         self.note_striked = timestamp;
+    }
+
+    /// Computes the fundamental frequency in Hz for this start note.
+    pub fn frequency(&self) -> Option<f32> {
+        note_to_frequency(self.pitch, self.octave, self.tonality_offset)
+    }
+
+    pub fn loudness_sones(&self) -> Option<f32> {
+        self.sones
+    }
+
+    pub fn loudness_phons(&self) -> Option<f32> {
+        self.phons
     }
 }
 
@@ -236,6 +352,10 @@ pub struct RecordNote {
     pub sum_spectral_centroid: f32,
     pub active_frames: usize,
     pub mpm_clarity: Option<f32>,
+    pub onset_sones: Option<f32>,
+    pub onset_phons: Option<f32>,
+    pub peak_sones: Option<f32>,
+    pub sum_sones: Option<f32>,
 }
 
 impl RecordNote {
@@ -265,6 +385,10 @@ impl RecordNote {
             sum_spectral_centroid: 800.0,
             active_frames: 1,
             mpm_clarity,
+            onset_sones: None,
+            onset_phons: None,
+            peak_sones: None,
+            sum_sones: None,
         }
     }
 
@@ -279,6 +403,8 @@ impl RecordNote {
         sub_thump_dbfs: f32,
         spectral_centroid: f32,
         mpm_clarity: Option<f32>,
+        onset_sones: Option<f32>,
+        onset_phons: Option<f32>,
     ) -> Self {
         Self {
             pitch,
@@ -298,17 +424,26 @@ impl RecordNote {
             sum_spectral_centroid: spectral_centroid,
             active_frames: 1,
             mpm_clarity,
+            onset_sones,
+            onset_phons,
+            peak_sones: onset_sones,
+            sum_sones: onset_sones,
         }
     }
 
     pub fn to_start_note(&self) -> StartNote {
-        let dynamic = DynamicLevel::from_dbfs(self.onset_dbfs);
+        let dynamic = self
+            .onset_phons
+            .map(DynamicLevel::from_phons)
+            .unwrap_or_else(|| DynamicLevel::from_dbfs(self.onset_dbfs));
         let velocity = calculate_midi_velocity(self.onset_dbfs, self.initial_crest_factor);
         StartNote {
             pitch: self.pitch,
             octave: self.octave,
             tonality_offset: self.tonality_offset,
             loudness_dbfs: self.onset_dbfs,
+            sones: self.onset_sones,
+            phons: self.onset_phons,
             note_striked: self.note_striked,
             crest_factor: self.initial_crest_factor,
             sub_thump_dbfs: self.initial_sub_thump_dbfs,
@@ -332,12 +467,41 @@ impl RecordNote {
         }
     }
 
-    pub fn accumulate_frame(&mut self, tonality_offset: i8, centroid: f32) {
+    pub fn accumulate_frame(&mut self, tonality_offset: i8, centroid: f32, sones: Option<f32>) {
         self.sum_cents += tonality_offset as i32;
         self.min_cents = self.min_cents.min(tonality_offset);
         self.max_cents = self.max_cents.max(tonality_offset);
         self.sum_spectral_centroid += centroid;
         self.active_frames += 1;
+
+        if let Some(s) = sones {
+            self.sum_sones = Some(self.sum_sones.unwrap_or(0.0) + s);
+            if self.peak_sones.map_or(true, |p| s > p) {
+                self.peak_sones = Some(s);
+            }
+        }
+    }
+
+    pub fn onset_sones(&self) -> Option<f32> {
+        self.onset_sones
+    }
+
+    pub fn onset_phons(&self) -> Option<f32> {
+        self.onset_phons
+    }
+
+    pub fn peak_sones(&self) -> Option<f32> {
+        self.peak_sones
+    }
+
+    pub fn avg_sones(&self) -> Option<f32> {
+        self.sum_sones.map(|sum| {
+            if self.active_frames > 0 {
+                sum / (self.active_frames as f32)
+            } else {
+                sum
+            }
+        })
     }
 
     pub fn into_end_note(self) -> EndNote {
@@ -388,8 +552,15 @@ impl RecordNote {
         );
 
         let is_flat = avg_cents <= profile.flat_cents_threshold;
-        let dynamic = DynamicLevel::from_dbfs(self.peak_dbfs);
         let damping = classify_damping(note_duration, profile);
+
+        let avg_sones = self.avg_sones();
+        let avg_phons = avg_sones.map(sones_to_phons);
+        let peak_sones = self.peak_sones;
+        let peak_phons = self.peak_sones.map(sones_to_phons);
+        let dynamic = peak_phons
+            .map(DynamicLevel::from_phons)
+            .unwrap_or_else(|| DynamicLevel::from_dbfs(self.peak_dbfs));
 
         EndNote {
             pitch: self.pitch,
@@ -397,6 +568,10 @@ impl RecordNote {
             tonality_offset: self.tonality_offset,
             avg_cents_offset: avg_cents,
             loudness_dbfs: self.peak_dbfs,
+            peak_sones,
+            peak_phons,
+            avg_sones,
+            avg_phons,
             rise_duration: effective_rise,
             attack_slope,
             note_duration,
@@ -511,5 +686,57 @@ impl Pitch {
             11 => Pitch::B,
             _ => Pitch::None,
         }
+    }
+}
+
+/// Converts a (Pitch, Octave) pair into a standard MIDI note number (0..=127).
+pub fn pitch_octave_to_midi(pitch: Pitch, octave: Octave) -> Option<u8> {
+    let pitch_class = match pitch {
+        Pitch::C => 0,
+        Pitch::CsDf => 1,
+        Pitch::D => 2,
+        Pitch::DsEf => 3,
+        Pitch::E => 4,
+        Pitch::F => 5,
+        Pitch::FsGf => 6,
+        Pitch::G => 7,
+        Pitch::GsAf => 8,
+        Pitch::A => 9,
+        Pitch::AsBf => 10,
+        Pitch::B => 11,
+        Pitch::None => return None,
+    };
+
+    let octave_num: i8 = match octave {
+        Octave::O_1 => -1,
+        Octave::O0 => 0,
+        Octave::O1 => 1,
+        Octave::O2 => 2,
+        Octave::O3 => 3,
+        Octave::O4 => 4,
+        Octave::O5 => 5,
+        Octave::O6 => 6,
+        Octave::O7 => 7,
+        Octave::O8 => 8,
+        Octave::O9 => 9,
+        Octave::O10 | Octave::OutOfRange => return None,
+    };
+
+    let midi = (octave_num + 1) * 12 + pitch_class;
+    if (0..=127).contains(&midi) {
+        Some(midi as u8)
+    } else {
+        None
+    }
+}
+
+/// Converts a (Pitch, Octave, tonality_offset_cents) triplet into an exact frequency in Hz.
+pub fn note_to_frequency(pitch: Pitch, octave: Octave, tonality_offset_cents: i8) -> Option<f32> {
+    let midi = pitch_octave_to_midi(pitch, octave)?;
+    let base_freq = midi_to_freq(midi);
+    if tonality_offset_cents == 0 {
+        Some(base_freq)
+    } else {
+        Some(base_freq * 2.0f32.powf(tonality_offset_cents as f32 / 1200.0))
     }
 }

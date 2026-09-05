@@ -109,15 +109,15 @@ impl<R: ErrorCallback> AudioEngine<R> {
         let is_playing = Arc::clone(&self.is_playing); // Acts as a drop guard, notifies when dropped
         let error_callback = Arc::clone(&self.error_callback);
         let threshold = self.silence_threshold;
-        let mode = self.pitch_detector_mode.clone();
-        let device = self.device.clone();
+        let mode = self.pitch_detector_mode;
+        let device = self.device;
 
-        let rb_prod = self
-            .rt_rb_prod
-            .take()
-            .expect("ring buffer producer should be present");
+        let Some(rb_prod) = self.rt_rb_prod.take() else {
+            return Err("No consumer was supplied, please reset the audio engine with a producer before trying again".into());
+        };
 
         let handle = thread::spawn(move || {
+            crate::utils::enable_flush_to_zero();
             let _guard = DropGuard::from(is_playing);
             let mut target_device_name = target_device_name;
             let mut stream: Option<Stream> = Some(initial_stream);
@@ -154,7 +154,7 @@ impl<R: ErrorCallback> AudioEngine<R> {
                         Ok(msg) => match msg {
                             EngineSignal::Closed => break 'supervisor,
                             EngineSignal::SwitchDevice { device_name } => {
-                                log::info!("Switching audio input device to: {:?}", device_name);
+                                // log::info!("Switching audio input device to: {:?}", device_name);
                                 target_device_name = device_name;
                                 stream = None;
                                 config = None;
@@ -162,7 +162,7 @@ impl<R: ErrorCallback> AudioEngine<R> {
                                 continue 'supervisor;
                             }
                             EngineSignal::Error { message } => {
-                                log::error!("Stream error: {}", message);
+                                // log::error!("Stream error: {}", message);
                                 error_callback.on_error(RustError::AudioEngineError(
                                     AudioEngineError::StreamBuildError(message),
                                 ));
@@ -211,7 +211,7 @@ impl<R: ErrorCallback> AudioEngine<R> {
                             mpm = Some(MPM::new(FRAME_SIZE / 2));
                         }
                         Err(e) => {
-                            log::error!("Stream build failed: {}", e);
+                            // log::error!("Stream build failed: {}", e);
                             error_callback.on_error(RustError::AudioEngineError(
                                 AudioEngineError::StreamBuildError(e.to_string()),
                             ));
@@ -359,10 +359,10 @@ impl<R: ErrorCallback> AudioEngine<R> {
                 .ok_or_else(|| "No default audio input device found".to_string())?,
         };
 
-        log::info!(
+        /*log::info!(
             "Selected audio input device: '{}'",
             Self::get_device_name(&device)
-        );
+        );*/
 
         let supported_configs = device.supported_input_configs()?.collect::<Vec<_>>();
 
@@ -377,7 +377,7 @@ impl<R: ErrorCallback> AudioEngine<R> {
             SampleFormat::U16,
         ];
 
-        // 1. Pass 1: Try preferred sample rate with mono or stereo
+        // Try preferred sample rate with mono or stereo
         'pass1: for &target_format in &formats {
             for range in &supported_configs {
                 if range.sample_format() == target_format
@@ -401,7 +401,7 @@ impl<R: ErrorCallback> AudioEngine<R> {
             }
         }
 
-        // 2. Pass 2: If no 1/2 channel found with preferred rates, try any channel count with preferred rates
+        // If no 1/2 channel found with preferred rates, try any channel count with preferred rates
         if selected_config.is_none() {
             'pass2: for &target_format in &formats {
                 for range in &supported_configs {
@@ -425,7 +425,7 @@ impl<R: ErrorCallback> AudioEngine<R> {
             }
         }
 
-        // 3. Pass 3: Try 1 or 2 channels with any supported sample rate
+        // Try 1 or 2 channels with any supported sample rate
         if selected_config.is_none() {
             'pass3: for &target_format in &formats {
                 for range in &supported_configs {
@@ -452,15 +452,15 @@ impl<R: ErrorCallback> AudioEngine<R> {
             }
         };
 
-        log::info!(
+        /* log::info!(
             "Starting audio input stream with format {:?} and config: {:?}",
             sample_format,
             config
-        );
+        );*/
 
         let err_signal_tx = signal_tx.clone();
         let err_fn = move |err: cpal::Error| {
-            log::error!("Audio input stream error: {}", err);
+            // log::error!("Audio input stream error: {}", err);
 
             let _ = err_signal_tx.send(EngineSignal::Error {
                 message: err.to_string(),

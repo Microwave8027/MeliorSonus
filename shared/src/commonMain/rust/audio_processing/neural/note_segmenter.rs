@@ -1,9 +1,13 @@
+use crate::audio_processing::PsychoacousticLoudnessMeter;
 use crate::audio_processing::instruments::instrument::InstrumentAcousticProfile;
 use crate::audio_processing::instruments::notes::*;
-use crate::audio_processing::neural::crnn::{BasicPitchOutput, MIDI_OFFSET, NUM_PITCH_BINS};
+use crate::audio_processing::neural::crnn::{BasicPitchOutput, MIDI_OFFSET, NUM_MIDI_NOTES, NUM_PITCH_BINS};
+use crate::constants::FRAME_SIZE;
 use arrayvec::ArrayVec;
 
-pub const MAX_POLYPHONIC_NOTES: usize = NUM_PITCH_BINS * 2;
+pub const MAX_POLYPHONIC_NOTES: usize = NUM_MIDI_NOTES * 2;
+pub const MONO_ENTRY_CLARITY: f32 = 0.80;
+pub const MONO_EXIT_CLARITY: f32 = 0.55;
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum SegmentedNoteEvent {
@@ -12,13 +16,14 @@ pub enum SegmentedNoteEvent {
 }
 
 pub struct StreamingNoteSegmenter {
-    active_notes: [Option<RecordNote>; NUM_PITCH_BINS],
+    active_notes: [Option<RecordNote>; NUM_MIDI_NOTES],
     active_mono_note: Option<RecordNote>,
+    psychoacoustic_loudness: PsychoacousticLoudnessMeter,
     onset_threshold: f32,
     frame_threshold: f32,
     min_note_duration_sec: f32,
 
-    // === Monophonic MPM Anti-Fragmentation & Elevated Thresholds ===
+    // Monophonic MPM Anti-Fragmentation & Elevated Thresholds
     /// Entry / lock clarity required to confirm a new pitch (default: 0.80)
     mono_entry_clarity: f32,
     /// Exit / sustain floor below which hangover countdown begins (default: 0.55)
@@ -36,9 +41,11 @@ pub struct StreamingNoteSegmenter {
 }
 
 impl StreamingNoteSegmenter {
-    pub fn new(onset_threshold: f32, frame_threshold: f32) -> Self {
-        let mono_entry_clarity = 0.80f32.max(frame_threshold);
-        let mono_exit_clarity = 0.55f32.min(frame_threshold);
+    pub fn new(onset_threshold: f32, frame_threshold: f32, sampling_rate: u32) -> Self {
+        let mono_entry_clarity = MONO_ENTRY_CLARITY.max(frame_threshold);
+        let mono_exit_clarity = MONO_EXIT_CLARITY.min(frame_threshold);
+
+        let psychoacoustic_loudness = PsychoacousticLoudnessMeter::<FRAME_SIZE>::new(sampling_rate);
         Self {
             active_notes: core::array::from_fn(|_| None),
             active_mono_note: None,
@@ -52,6 +59,7 @@ impl StreamingNoteSegmenter {
             mono_hangover_default: 3,
             pitch_hysteresis_semitones: 0.70,
             pending_legato_candidate: None,
+            psychoacoustic_loudness,
         }
     }
 
@@ -84,104 +92,30 @@ impl StreamingNoteSegmenter {
         self.active_mono_note.as_ref()
     }
 
-    pub fn active_notes(&self) -> &[Option<RecordNote>; NUM_PITCH_BINS] {
+    pub fn active_notes(&self) -> &[Option<RecordNote>; NUM_MIDI_NOTES] {
         &self.active_notes
     }
 
-    /// Converts a frequency in Hz into a MIDI pitch index (0..NUM_PITCH_BINS).
+    /// Converts a frequency in Hz into a global MIDI note number (0..127).
     pub fn freq_to_midi_index(freq: f32) -> Option<usize> {
-        if freq < 27.5 || freq > 4186.0 || freq.is_nan() || freq.is_infinite() {
+        if freq <= 0.0 || freq.is_nan() || freq.is_infinite() {
             return None;
         }
-        let midi = (69.0 + 12.0 * (freq / 440.0).log2()).round() as usize;
-        if midi >= MIDI_OFFSET && midi < MIDI_OFFSET + NUM_PITCH_BINS {
-            Some(midi - MIDI_OFFSET)
-        } else {
-            None
+        let n = 69.0 + 12.0 * (freq / 440.0).log2();
+        if !(0.0..=127.0).contains(&n) {
+            return None;
         }
+        Some(n.round() as usize)
     }
 
-    /// Converts a (Pitch, Octave) into a MIDI pitch index (0..NUM_PITCH_BINS).
+    /// Converts a (Pitch, Octave) into a global MIDI note number (0..127).
     pub fn note_to_midi_index(pitch: Pitch, octave: Octave) -> Option<usize> {
-        let pitch_class = match pitch {
-            Pitch::C => 0,
-            Pitch::CsDf => 1,
-            Pitch::D => 2,
-            Pitch::DsEf => 3,
-            Pitch::E => 4,
-            Pitch::F => 5,
-            Pitch::FsGf => 6,
-            Pitch::G => 7,
-            Pitch::GsAf => 8,
-            Pitch::A => 9,
-            Pitch::AsBf => 10,
-            Pitch::B => 11,
-            Pitch::None => return None,
-        };
-
-        let octave_num: i8 = match octave {
-            Octave::O_1 => -1,
-            Octave::O0 => 0,
-            Octave::O1 => 1,
-            Octave::O2 => 2,
-            Octave::O3 => 3,
-            Octave::O4 => 4,
-            Octave::O5 => 5,
-            Octave::O6 => 6,
-            Octave::O7 => 7,
-            Octave::O8 => 8,
-            Octave::O9 => 9,
-            Octave::O10 | Octave::OutOfRange => return None,
-        };
-
-        let midi_number = (octave_num + 1) * 12 + pitch_class;
-        if midi_number >= (MIDI_OFFSET as i8)
-            && midi_number < ((MIDI_OFFSET + NUM_PITCH_BINS) as i8)
-        {
-            Some((midi_number as usize) - MIDI_OFFSET)
-        } else {
-            None
-        }
+        pitch_octave_to_midi(pitch, octave).map(|m| m as usize)
     }
 
-    /// Converts a MIDI pitch index (0..NUM_PITCH_BINS) back into (Pitch, Octave).
+    /// Converts a global MIDI note number (0..127) back into (Pitch, Octave).
     pub fn midi_index_to_note(idx: usize) -> (Pitch, Octave) {
-        let midi = (idx + MIDI_OFFSET) as i32;
-        let pitch_class = (midi % 12) as u8;
-        let octave_num = (midi / 12) - 1;
-
-        let pitch = match pitch_class {
-            0 => Pitch::C,
-            1 => Pitch::CsDf,
-            2 => Pitch::D,
-            3 => Pitch::DsEf,
-            4 => Pitch::E,
-            5 => Pitch::F,
-            6 => Pitch::FsGf,
-            7 => Pitch::G,
-            8 => Pitch::GsAf,
-            9 => Pitch::A,
-            10 => Pitch::AsBf,
-            11 => Pitch::B,
-            _ => Pitch::None,
-        };
-
-        let octave = match octave_num {
-            -1 => Octave::O_1,
-            0 => Octave::O0,
-            1 => Octave::O1,
-            2 => Octave::O2,
-            3 => Octave::O3,
-            4 => Octave::O4,
-            5 => Octave::O5,
-            6 => Octave::O6,
-            7 => Octave::O7,
-            8 => Octave::O8,
-            9 => Octave::O9,
-            _ => Octave::O4,
-        };
-
-        (pitch, octave)
+        (Pitch::get_pitch(idx as u8), Octave::midi_to_note(idx as u8))
     }
 
     /// Transfers the active monophonic note from MPM to polyphonic CRNN tracking
@@ -246,11 +180,12 @@ impl StreamingNoteSegmenter {
         let (freq_hz, clarity, dbfs) = mpm_result;
 
         // 1. Continuous fractional MIDI pitch calculation
-        let continuous_midi = if freq_hz > 20.0 && freq_hz < 4500.0 && !freq_hz.is_nan() && !freq_hz.is_infinite() {
-            Some(69.0 + 12.0 * (freq_hz / 440.0).log2())
-        } else {
-            None
-        };
+        let continuous_midi =
+            if freq_hz > 20.0 && freq_hz < 4500.0 && !freq_hz.is_nan() && !freq_hz.is_infinite() {
+                Some(69.0 + 12.0 * (freq_hz / 440.0).log2())
+            } else {
+                None
+            };
 
         // 2. Discrete pitch candidate (only when clarity >= mono_entry_clarity)
         let detected_pitch_candidate = if clarity >= self.mono_entry_clarity {
@@ -260,12 +195,12 @@ impl StreamingNoteSegmenter {
         };
 
         if let Some(active_note) = self.active_mono_note.as_mut() {
-            let active_nominal_midi = Self::note_to_midi_index(active_note.pitch, active_note.octave)
-                .map(|idx| (idx + MIDI_OFFSET) as f32);
+            let active_nominal_midi =
+                Self::note_to_midi_index(active_note.pitch, active_note.octave)
+                    .map(|midi| midi as f32);
 
-            let is_voiced = clarity >= self.mono_exit_clarity
-                && continuous_midi.is_some()
-                && dbfs >= -65.0;
+            let is_voiced =
+                clarity >= self.mono_exit_clarity && continuous_midi.is_some() && dbfs >= -65.0;
 
             if is_voiced {
                 let midi_val = continuous_midi.unwrap();
@@ -286,19 +221,23 @@ impl StreamingNoteSegmenter {
                         // A true restrike requires that the new onset timestamp is >= 80ms after the active note was struck
                         if onset_ts.saturating_sub(active_note.note_striked) >= 80 {
                             let old_note = self.active_mono_note.take().unwrap();
-                            let end_note = old_note.into_end_note_with_profile(onset_ts, false, profile);
+                            let end_note =
+                                old_note.into_end_note_with_profile(onset_ts, false, profile);
                             if end_note.note_duration >= self.min_note_duration_sec {
                                 let _ = events.try_push(SegmentedNoteEvent::End(end_note));
                             }
 
-                            let (pitch, octave, tonality_offset) = detected_pitch_candidate.unwrap_or_else(|| {
-                                let rounded_midi = midi_val.round() as u8;
-                                (
-                                    Pitch::get_pitch(rounded_midi),
-                                    Octave::midi_to_note(rounded_midi),
-                                    ((midi_val - rounded_midi as f32) * 100.0).clamp(-128.0, 127.0).round() as i8,
-                                )
-                            });
+                            let (pitch, octave, tonality_offset) = detected_pitch_candidate
+                                .unwrap_or_else(|| {
+                                    let rounded_midi = midi_val.round() as u8;
+                                    (
+                                        Pitch::get_pitch(rounded_midi),
+                                        Octave::midi_to_note(rounded_midi),
+                                        ((midi_val - rounded_midi as f32) * 100.0)
+                                            .clamp(-128.0, 127.0)
+                                            .round() as i8,
+                                    )
+                                });
 
                             let new_note = RecordNote::new_with_features(
                                 pitch,
@@ -310,6 +249,8 @@ impl StreamingNoteSegmenter {
                                 sub_thump_dbfs,
                                 spectral_centroid,
                                 Some(clarity),
+                                None,
+                                None,
                             );
                             let start_event = new_note.to_start_note();
                             self.active_mono_note = Some(new_note);
@@ -321,15 +262,19 @@ impl StreamingNoteSegmenter {
                                 active_note.note_striked = onset_ts;
                             }
                             active_note.add_peak_dbfs(dbfs);
-                            let tonality_offset = ((midi_val - midi_val.round()) * 100.0).clamp(-128.0, 127.0).round() as i8;
-                            active_note.accumulate_frame(tonality_offset, spectral_centroid);
+                            let tonality_offset = ((midi_val - midi_val.round()) * 100.0)
+                                .clamp(-128.0, 127.0)
+                                .round() as i8;
+                            active_note.accumulate_frame(tonality_offset, spectral_centroid, None);
                             active_note.last_timestamp = timestamp_ms;
                         }
                     } else {
                         // Normal steady-state sustain
                         active_note.add_peak_dbfs(dbfs);
-                        let tonality_offset = ((midi_val - midi_val.round()) * 100.0).clamp(-128.0, 127.0).round() as i8;
-                        active_note.accumulate_frame(tonality_offset, spectral_centroid);
+                        let tonality_offset = ((midi_val - midi_val.round()) * 100.0)
+                            .clamp(-128.0, 127.0)
+                            .round() as i8;
+                        active_note.accumulate_frame(tonality_offset, spectral_centroid, None);
                         active_note.last_timestamp = timestamp_ms;
                     }
                 } else if let Some((new_pitch, new_octave, new_offset)) = detected_pitch_candidate {
@@ -341,7 +286,7 @@ impl StreamingNoteSegmenter {
                         active_note.octave = new_octave;
                         active_note.tonality_offset = new_offset;
                         active_note.add_peak_dbfs(dbfs);
-                        active_note.accumulate_frame(new_offset, spectral_centroid);
+                        active_note.accumulate_frame(new_offset, spectral_centroid, None);
                         active_note.last_timestamp = timestamp_ms;
                         self.pending_legato_candidate = None;
                     } else {
@@ -352,12 +297,20 @@ impl StreamingNoteSegmenter {
                         };
 
                         if is_matching_candidate {
-                            let count = self.pending_legato_candidate.map(|(_, _, _, c)| c).unwrap_or(0) + 1;
+                            let count = self
+                                .pending_legato_candidate
+                                .map(|(_, _, _, c)| c)
+                                .unwrap_or(0)
+                                + 1;
                             if count >= 2 {
                                 // Confirmed legato transition!
                                 self.pending_legato_candidate = None;
                                 let old_note = self.active_mono_note.take().unwrap();
-                                let end_note = old_note.into_end_note_with_profile(timestamp_ms, true, profile);
+                                let end_note = old_note.into_end_note_with_profile(
+                                    timestamp_ms,
+                                    true,
+                                    profile,
+                                );
                                 if end_note.note_duration >= self.min_note_duration_sec {
                                     let _ = events.try_push(SegmentedNoteEvent::End(end_note));
                                 }
@@ -372,17 +325,21 @@ impl StreamingNoteSegmenter {
                                     sub_thump_dbfs,
                                     spectral_centroid,
                                     Some(clarity),
+                                    None,
+                                    None,
                                 );
                                 let start_event = new_note.to_start_note();
                                 self.active_mono_note = Some(new_note);
                                 let _ = events.try_push(SegmentedNoteEvent::Start(start_event));
                             } else {
-                                self.pending_legato_candidate = Some((new_pitch, new_octave, new_offset, count));
+                                self.pending_legato_candidate =
+                                    Some((new_pitch, new_octave, new_offset, count));
                                 active_note.last_timestamp = timestamp_ms;
                             }
                         } else {
                             // First frame of new pitch candidate: hold off and accumulate
-                            self.pending_legato_candidate = Some((new_pitch, new_octave, new_offset, 1));
+                            self.pending_legato_candidate =
+                                Some((new_pitch, new_octave, new_offset, 1));
                             active_note.last_timestamp = timestamp_ms;
                         }
                     }
@@ -406,7 +363,11 @@ impl StreamingNoteSegmenter {
                     if self.mono_hangover_frames == 0 {
                         // Hangover expired
                         let old_note = self.active_mono_note.take().unwrap();
-                        let end_note = old_note.into_end_note_with_profile(self.mono_hangover_start_ts, false, profile);
+                        let end_note = old_note.into_end_note_with_profile(
+                            self.mono_hangover_start_ts,
+                            false,
+                            profile,
+                        );
                         if end_note.note_duration >= self.min_note_duration_sec {
                             let _ = events.try_push(SegmentedNoteEvent::End(end_note));
                         }
@@ -415,7 +376,8 @@ impl StreamingNoteSegmenter {
                     // Large timestamp gap or already expired -> finalize immediately
                     self.mono_hangover_frames = 0;
                     let old_note = self.active_mono_note.take().unwrap();
-                    let end_note = old_note.into_end_note_with_profile(timestamp_ms, false, profile);
+                    let end_note =
+                        old_note.into_end_note_with_profile(timestamp_ms, false, profile);
                     if end_note.note_duration >= self.min_note_duration_sec {
                         let _ = events.try_push(SegmentedNoteEvent::End(end_note));
                     }
@@ -438,6 +400,8 @@ impl StreamingNoteSegmenter {
                     sub_thump_dbfs,
                     spectral_centroid,
                     Some(clarity),
+                    None,
+                    None,
                 );
                 let start_event = note.to_start_note();
                 self.active_mono_note = Some(note);
@@ -457,21 +421,38 @@ impl StreamingNoteSegmenter {
         sub_thump_dbfs: f32,
         spectral_centroid: f32,
         profile: &InstrumentAcousticProfile,
+        frame: &[f32],
     ) -> ArrayVec<SegmentedNoteEvent, MAX_POLYPHONIC_NOTES> {
         let mut events = ArrayVec::new();
 
-        for (idx, (&frame_prob, &onset_prob)) in
-            output.frames.iter().zip(output.onsets.iter()).enumerate()
-        {
-            let is_onset = onset_prob >= self.onset_threshold;
-            let is_frame_active = frame_prob >= self.frame_threshold;
+        let mut valid_frequencies = ArrayVec::<f32, NUM_PITCH_BINS>::new();
+        for (idx, &frame_prob) in output.frames.iter().enumerate() {
+            let midi_idx = idx + MIDI_OFFSET;
+            let is_onset = output.onsets.get(idx).map_or(false, |&p| p >= self.onset_threshold);
+            let is_active = self.active_notes.get(midi_idx).and_then(|n| n.as_ref()).is_some();
+            if frame_prob >= self.frame_threshold || is_onset || is_active {
+                let _ = valid_frequencies.try_push(midi_to_freq(midi_idx as u8));
+            }
+        }
+        let loudness_values = self
+            .psychoacoustic_loudness
+            .calculate_frequency_loudness(frame, &valid_frequencies[..]);
 
-            let (pitch, octave) = Self::midi_index_to_note(idx);
+        for (idx, &onset_prob) in output.onsets.iter().enumerate() {
+            let midi_idx = idx + MIDI_OFFSET;
+            let is_onset = onset_prob >= self.onset_threshold;
+
+            let loudness_opt = loudness_values.get(midi_idx).and_then(|&opt| opt);
+            let is_frame_active = loudness_opt.is_some();
+            let sones = loudness_opt.map(|l| l.sones);
+            let phons = loudness_opt.map(|l| l.phons);
+
+            let (pitch, octave) = Self::midi_index_to_note(midi_idx);
             let tonality_offset = 0i8;
 
-            match (self.active_notes[idx].as_mut(), is_frame_active, is_onset) {
+            match (self.active_notes[midi_idx].as_mut(), is_frame_active, is_onset) {
                 // New Note Onset
-                (None, true, true) | (None, true, false) => {
+                (None, true, _) => {
                     let note = RecordNote::new_with_features(
                         pitch,
                         octave,
@@ -482,15 +463,17 @@ impl StreamingNoteSegmenter {
                         sub_thump_dbfs,
                         spectral_centroid,
                         None,
+                        sones,
+                        phons,
                     );
                     let start_event = note.to_start_note();
-                    self.active_notes[idx] = Some(note);
+                    self.active_notes[midi_idx] = Some(note);
                     let _ = events.try_push(SegmentedNoteEvent::Start(start_event));
                 }
 
                 // Re-articulation / Restrike on already active note
                 (Some(_), true, true) => {
-                    let old_note = self.active_notes[idx].take().unwrap();
+                    let old_note = self.active_notes[midi_idx].take().unwrap();
                     let end_note =
                         old_note.into_end_note_with_profile(timestamp_ms, false, profile);
                     if end_note.note_duration >= self.min_note_duration_sec {
@@ -507,21 +490,23 @@ impl StreamingNoteSegmenter {
                         sub_thump_dbfs,
                         spectral_centroid,
                         None,
+                        sones,
+                        phons,
                     );
                     let start_event = new_note.to_start_note();
-                    self.active_notes[idx] = Some(new_note);
+                    self.active_notes[midi_idx] = Some(new_note);
                     let _ = events.try_push(SegmentedNoteEvent::Start(start_event));
                 }
 
                 // Note Sustain
                 (Some(note), true, false) => {
                     note.add_peak_dbfs(output.energy_dbfs);
-                    note.accumulate_frame(tonality_offset, spectral_centroid);
+                    note.accumulate_frame(tonality_offset, spectral_centroid, sones);
                 }
 
                 // Note Release
                 (Some(_), false, _) => {
-                    let old_note = self.active_notes[idx].take().unwrap();
+                    let old_note = self.active_notes[midi_idx].take().unwrap();
                     let end_note =
                         old_note.into_end_note_with_profile(timestamp_ms, false, profile);
                     if end_note.note_duration >= self.min_note_duration_sec {
@@ -573,26 +558,48 @@ mod tests {
     fn test_midi_pitch_conversion() {
         assert_eq!(
             StreamingNoteSegmenter::note_to_midi_index(Pitch::A, Octave::O4),
-            Some(48)
+            Some(69)
         );
         assert_eq!(
-            StreamingNoteSegmenter::midi_index_to_note(48),
+            StreamingNoteSegmenter::midi_index_to_note(69),
             (Pitch::A, Octave::O4)
         );
 
         assert_eq!(
             StreamingNoteSegmenter::note_to_midi_index(Pitch::C, Octave::O4),
-            Some(39)
+            Some(60)
         );
         assert_eq!(
-            StreamingNoteSegmenter::midi_index_to_note(39),
+            StreamingNoteSegmenter::midi_index_to_note(60),
             (Pitch::C, Octave::O4)
         );
+
+        // Boundary tests across 0..127 global MIDI scale
+        assert_eq!(
+            StreamingNoteSegmenter::note_to_midi_index(Pitch::C, Octave::O_1),
+            Some(0)
+        );
+        assert_eq!(
+            StreamingNoteSegmenter::midi_index_to_note(0),
+            (Pitch::C, Octave::O_1)
+        );
+
+        assert_eq!(
+            StreamingNoteSegmenter::note_to_midi_index(Pitch::G, Octave::O9),
+            Some(127)
+        );
+        assert_eq!(
+            StreamingNoteSegmenter::midi_index_to_note(127),
+            (Pitch::G, Octave::O9)
+        );
+
+        assert_eq!(StreamingNoteSegmenter::freq_to_midi_index(440.0), Some(69));
+        assert_eq!(StreamingNoteSegmenter::freq_to_midi_index(261.63), Some(60));
     }
 
     #[test]
     fn test_segmenter_start_and_end() {
-        let mut segmenter = StreamingNoteSegmenter::new(0.5, 0.4);
+        let mut segmenter = StreamingNoteSegmenter::new(0.5, 0.4, 44100);
         let profile = Instrument::Piano.acoustic_profile();
 
         let event1 = segmenter.process_mpm_frame(
@@ -615,7 +622,7 @@ mod tests {
 
     #[test]
     fn test_segmenter_restrike() {
-        let mut segmenter = StreamingNoteSegmenter::new(0.5, 0.4);
+        let mut segmenter = StreamingNoteSegmenter::new(0.5, 0.4, 44100);
         let profile = Instrument::Piano.acoustic_profile();
 
         let _ = segmenter.process_mpm_frame(
@@ -657,7 +664,7 @@ mod tests {
 
     #[test]
     fn test_mpm_loud_strike_early_attack_pitch_clarification() {
-        let mut segmenter = StreamingNoteSegmenter::new(0.5, 0.4);
+        let mut segmenter = StreamingNoteSegmenter::new(0.5, 0.4, 44100);
         let profile = Instrument::Piano.acoustic_profile();
 
         // 1. Loud strike attack at ts=1000: Initial overtone detected (A5 at 880 Hz)
@@ -684,7 +691,10 @@ mod tests {
             &profile,
         );
         // Early attack pitch adoption must update the note without emitting a legato split (0 events)
-        assert!(event2.is_empty(), "Early attack overtone clarification must not split note");
+        assert!(
+            event2.is_empty(),
+            "Early attack overtone clarification must not split note"
+        );
         assert_eq!(segmenter.active_mono_note().unwrap().pitch, Pitch::A);
         assert_eq!(segmenter.active_mono_note().unwrap().octave, Octave::O4);
         assert_eq!(segmenter.active_mono_note().unwrap().note_striked, 1000);
@@ -692,7 +702,7 @@ mod tests {
 
     #[test]
     fn test_mpm_vibrato_hysteresis_does_not_fragment() {
-        let mut segmenter = StreamingNoteSegmenter::new(0.5, 0.4);
+        let mut segmenter = StreamingNoteSegmenter::new(0.5, 0.4, 44100);
         let profile = Instrument::Piano.acoustic_profile();
 
         // 1. Initial lock at 440.0 Hz (A4, 0 cents)
@@ -730,7 +740,10 @@ mod tests {
             1500.0,
             &profile,
         );
-        assert!(vib2.is_empty(), "Vibrato sweep downward must not emit note events");
+        assert!(
+            vib2.is_empty(),
+            "Vibrato sweep downward must not emit note events"
+        );
 
         // Assert note is still single continuous active note
         assert!(segmenter.active_mono_note().is_some());
@@ -741,7 +754,7 @@ mod tests {
 
     #[test]
     fn test_mpm_clarity_hangover_bridges_gap() {
-        let mut segmenter = StreamingNoteSegmenter::new(0.5, 0.4);
+        let mut segmenter = StreamingNoteSegmenter::new(0.5, 0.4, 44100);
         let profile = Instrument::Piano.acoustic_profile();
 
         // 1. Start note at 440 Hz
@@ -765,7 +778,10 @@ mod tests {
             1200.0,
             &profile,
         );
-        assert!(dip.is_empty(), "Single-frame clarity dip must be absorbed by hangover");
+        assert!(
+            dip.is_empty(),
+            "Single-frame clarity dip must be absorbed by hangover"
+        );
         assert!(segmenter.active_mono_note().is_some());
 
         // 3. Clarity recovers on next frame (ts=1024ms)
@@ -778,13 +794,16 @@ mod tests {
             1400.0,
             &profile,
         );
-        assert!(rec.is_empty(), "Recovery must continue seamless sustain without re-triggering");
+        assert!(
+            rec.is_empty(),
+            "Recovery must continue seamless sustain without re-triggering"
+        );
         assert!(segmenter.active_mono_note().is_some());
     }
 
     #[test]
     fn test_mpm_legato_requires_confirmation() {
-        let mut segmenter = StreamingNoteSegmenter::new(0.5, 0.4);
+        let mut segmenter = StreamingNoteSegmenter::new(0.5, 0.4, 44100);
         let profile = Instrument::Piano.acoustic_profile();
 
         // 1. Start on A4 (440 Hz)
@@ -808,7 +827,10 @@ mod tests {
             1600.0,
             &profile,
         );
-        assert!(glitch.is_empty(), "Single glitch frame must not immediately trigger legato");
+        assert!(
+            glitch.is_empty(),
+            "Single glitch frame must not immediately trigger legato"
+        );
 
         // 3. Glitch disappears, returns to A4 on ts=1024
         let return_frame = segmenter.process_mpm_frame(
@@ -853,7 +875,7 @@ mod tests {
 
     #[test]
     fn test_mpm_hfc_restrike_debounce() {
-        let mut segmenter = StreamingNoteSegmenter::new(0.5, 0.4);
+        let mut segmenter = StreamingNoteSegmenter::new(0.5, 0.4, 44100);
         let profile = Instrument::Piano.acoustic_profile();
 
         // 1. Start note at ts=1000
@@ -877,7 +899,10 @@ mod tests {
             1800.0,
             &profile,
         );
-        assert!(early_onset.is_empty(), "Onset within 80ms must not restrike");
+        assert!(
+            early_onset.is_empty(),
+            "Onset within 80ms must not restrike"
+        );
 
         // 3. Valid HFC onset at ts=1090 (90ms after start >= 80ms) -> Restrikes
         let valid_onset = segmenter.process_mpm_frame(
@@ -889,12 +914,16 @@ mod tests {
             2000.0,
             &profile,
         );
-        assert_eq!(valid_onset.len(), 2, "Restrike after 80ms must emit End + Start");
+        assert_eq!(
+            valid_onset.len(),
+            2,
+            "Restrike after 80ms must emit End + Start"
+        );
     }
 
     #[test]
     fn test_mpm_elevated_clarity_rejection() {
-        let mut segmenter = StreamingNoteSegmenter::new(0.5, 0.4);
+        let mut segmenter = StreamingNoteSegmenter::new(0.5, 0.4, 44100);
         let profile = Instrument::Piano.acoustic_profile();
 
         // Low clarity frame (0.65 < 0.80 mono entry clarity) from idle -> No note started

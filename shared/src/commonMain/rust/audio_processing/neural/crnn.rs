@@ -1,5 +1,6 @@
 pub const NUM_PITCH_BINS: usize = 88; // MIDI 21 (A0) to MIDI 108 (C8)
 pub const MIDI_OFFSET: usize = 21;
+pub const NUM_MIDI_NOTES: usize = 128; // Global MIDI notes 0 (C-1) to 127 (G9)
 
 /// Inference output format corresponding to Spotify Basic Pitch model heads.
 #[derive(Clone, Debug)]

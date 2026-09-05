@@ -5,6 +5,8 @@ use std::sync::{LazyLock, RwLock};
 // [polyphonic audio extractor]
 pub const MAX_POLYPHONY: usize = 16;
 pub const PITCH_BINS: usize = 88; // Piano keys A0 (MIDI 21) to C8 (MIDI 108)
+pub const MIDI_OFFSET: usize = 21;
+pub const NUM_MIDI_NOTES: usize = 128;
 pub const HANGOVER_FRAMES_DEFAULT: u8 = 5;
 
 // [CPAL Audio Engine]

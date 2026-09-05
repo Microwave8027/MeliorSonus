@@ -5,7 +5,7 @@ use crate::audio_processing::neural::{SegmentedNoteEvent, StreamingNoteSegmenter
 
 #[test]
 fn test_streaming_segmenter_monophonic_lifecycle() {
-    let mut segmenter = StreamingNoteSegmenter::new(0.5, 0.4);
+    let mut segmenter = StreamingNoteSegmenter::new(0.5, 0.4, 48000);
     let profile = Instrument::Piano.acoustic_profile();
 
     // 1. Onset frame: 440 Hz (A4), clarity = 0.95, dBFS = -12.0
@@ -92,7 +92,7 @@ fn test_streaming_segmenter_monophonic_lifecycle() {
 
 #[test]
 fn test_streaming_segmenter_polyphonic_multi_note() {
-    let mut segmenter = StreamingNoteSegmenter::new(0.5, 0.4);
+    let mut segmenter = StreamingNoteSegmenter::new(0.5, 0.4, 48000);
     let profile = Instrument::Piano.acoustic_profile();
 
     let mut out = BasicPitchOutput {
@@ -108,7 +108,8 @@ fn test_streaming_segmenter_polyphonic_multi_note() {
     out.frames[43] = 0.85;
     out.onsets[43] = 0.90;
 
-    let events = segmenter.process_crnn_frame(&out, 1000, 12.0, -60.0, 1200.0, &profile);
+    let dummy_frame = [0.0f32; 1024];
+    let events = segmenter.process_crnn_frame(&out, 1000, 12.0, -60.0, 1200.0, &profile, &dummy_frame);
     assert_eq!(events.len(), 2);
     assert!(events.iter().any(|e| matches!(e, SegmentedNoteEvent::Start(s) if s.pitch == Pitch::C && s.octave == Octave::O4)));
     assert!(events.iter().any(|e| matches!(e, SegmentedNoteEvent::Start(s) if s.pitch == Pitch::E && s.octave == Octave::O4)));
@@ -118,7 +119,7 @@ fn test_streaming_segmenter_polyphonic_multi_note() {
     out.onsets[39] = 0.0;
     out.onsets[43] = 0.0;
 
-    let events2 = segmenter.process_crnn_frame(&out, 1100, 8.0, -60.0, 1100.0, &profile);
+    let events2 = segmenter.process_crnn_frame(&out, 1100, 8.0, -60.0, 1100.0, &profile, &dummy_frame);
     assert_eq!(events2.len(), 1);
     match &events2[0] {
         SegmentedNoteEvent::End(e) => {

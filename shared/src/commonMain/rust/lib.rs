@@ -10,7 +10,6 @@ pub mod utils;
 mod tests;
 
 pub mod prelude {
-    pub use crate::audio_analysis::*;
     pub use crate::audio_processing::cpal::engine::AudioEngine;
     pub use crate::audio_processing::dsp::*;
     pub use crate::audio_processing::instruments::instrument::{
@@ -29,6 +28,7 @@ pub mod prelude {
     pub use crate::card_output::card::{Card, CardType, test};
     pub use crate::utils::error_callback::ErrorCallback;
     pub use crate::utils::errors::RustError;
+    pub use crate::utils::flush_to_zero::*;
     pub use crate::utils::guard::DropGuard;
     pub use cpal::{Stream, StreamConfig};
     pub use rtrb::{Consumer, Producer, RingBuffer};

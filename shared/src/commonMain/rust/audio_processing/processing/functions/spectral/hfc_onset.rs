@@ -20,10 +20,10 @@ pub fn compute_hfc(magnitudes: &[f32]) -> f32 {
 /// Standalone real-time zero-allocation HFC Onset and Transient Detector.
 ///
 /// Features:
-/// 1. Sliding 7-frame sliding window with local peak-picking around window midpoint.
-/// 2. Adaptive statistical thresholding: Candidate >= Median(Window) + C * StdDev(Window).
-/// 3. RMS silence gating to suppress noise floor jitter.
-/// 4. Minimum Inter-Onset Interval (MinIOI) debounce to eliminate flutter and multiple-triggers.
+/// Sliding 7-frame sliding window with local peak-picking around window midpoint.
+/// Adaptive statistical thresholding: Candidate >= Median(Window) + C * StdDev(Window).
+/// RMS silence gating to suppress noise floor jitter.
+/// Minimum Inter-Onset Interval (MinIOI) debounce to eliminate flutter and multiple-triggers.
 #[derive(Debug, Clone)]
 pub struct HfcOnsetDetector {
     threshold: f32,

@@ -61,6 +61,8 @@ where
                 sub_thump_dbfs,
                 spectral_centroid,
                 mpm_clarity,
+                None,
+                None,
             );
             let start_note = record.to_start_note();
             on_start(&mut record);
@@ -78,7 +80,7 @@ where
                     if mpm_clarity.is_some() {
                         active.mpm_clarity = mpm_clarity;
                     }
-                    active.accumulate_frame(tonality_offset, spectral_centroid);
+                    active.accumulate_frame(tonality_offset, spectral_centroid, None);
                     if dbfs >= active.peak_dbfs {
                         active.add_peak_dbfs(dbfs);
                         on_update(active, NoteEnvelopeState::Rise);
@@ -101,6 +103,8 @@ where
                         sub_thump_dbfs,
                         spectral_centroid,
                         mpm_clarity,
+                        None,
+                        None,
                     );
                     let start_note = record.to_start_note();
                     on_start(&mut record);
@@ -119,6 +123,8 @@ where
                     sub_thump_dbfs,
                     spectral_centroid,
                     mpm_clarity,
+                    None,
+                    None,
                 );
                 let start_note = record.to_start_note();
                 on_start(&mut record);
@@ -143,7 +149,7 @@ where
                     if mpm_clarity.is_some() {
                         active.mpm_clarity = mpm_clarity;
                     }
-                    active.accumulate_frame(tonality_offset, spectral_centroid);
+                    active.accumulate_frame(tonality_offset, spectral_centroid, None);
                     *state = NoteEnvelopeState::Decay;
                     on_update(active, NoteEnvelopeState::Decay);
                 } else {
@@ -160,6 +166,8 @@ where
                         sub_thump_dbfs,
                         spectral_centroid,
                         mpm_clarity,
+                        None,
+                        None,
                     );
                     let start_note = record.to_start_note();
                     on_start(&mut record);
@@ -178,6 +186,8 @@ where
                     sub_thump_dbfs,
                     spectral_centroid,
                     mpm_clarity,
+                    None,
+                    None,
                 );
                 let start_note = record.to_start_note();
                 on_start(&mut record);
@@ -215,6 +225,8 @@ where
                             sub_thump_dbfs,
                             spectral_centroid,
                             mpm_clarity,
+                            None,
+                            None,
                         );
                         let start_note = record.to_start_note();
                         on_start(&mut record);
@@ -228,7 +240,7 @@ where
                         if mpm_clarity.is_some() {
                             active.mpm_clarity = mpm_clarity;
                         }
-                        active.accumulate_frame(tonality_offset, spectral_centroid);
+                        active.accumulate_frame(tonality_offset, spectral_centroid, None);
                         if dbfs > active.peak_dbfs {
                             active.add_peak_dbfs(dbfs);
                         }
@@ -248,6 +260,8 @@ where
                         sub_thump_dbfs,
                         spectral_centroid,
                         mpm_clarity,
+                        None,
+                        None,
                     );
                     let start_note = record.to_start_note();
                     on_start(&mut record);
@@ -266,6 +280,8 @@ where
                     sub_thump_dbfs,
                     spectral_centroid,
                     mpm_clarity,
+                    None,
+                    None,
                 );
                 let start_note = record.to_start_note();
                 on_start(&mut record);

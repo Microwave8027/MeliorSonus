@@ -15,6 +15,8 @@ fn test_damping_detection_piano_vs_violin() {
         -60.0,
         1500.0,
         Some(0.95),
+        None,
+        None,
     );
     // 50ms duration (staccato <= 0.08) -> DryDamped
     let end1 = note1.into_end_note_with_profile(1050, false, &piano_profile);
@@ -30,6 +32,8 @@ fn test_damping_detection_piano_vs_violin() {
         -60.0,
         1500.0,
         Some(0.95),
+        None,
+        None,
     );
     // 1.8s duration (tenuto >= 0.6) -> PedalSustained
     let end2 = note2.into_end_note_with_profile(2800, false, &piano_profile);

@@ -20,3 +20,4 @@ node_modules/
 **/target/
 .vscode/
 tools/build_litert/_*
+shared/src/commonMain/rust/assets/mxl_assets/*
