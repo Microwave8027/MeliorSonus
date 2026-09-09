@@ -1,12 +1,12 @@
 use compose_app::audio_processing::{
     HybridFeatureExtractor, HybridPitchDetectorMode, PitchDetectorMode,
 };
-use compose_app::constants::{GLOBAL_AUDIO_METRICS, GLOBAL_SETTINGS, NOTE_RINGBUF_CAPACITY};
+use compose_app::constants::{GLOBAL_AUDIO_METRICS, NOTE_RINGBUF_CAPACITY};
 use compose_app::prelude::*;
-use compose_app::utils::LiveAudioMetrics;
+use compose_app::utils::{LiveAudioMetrics, global_settings::GlobalSettings};
 use std::env;
 use std::io::{self, Write};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -464,21 +464,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     println!("\n(Tip: Pass `--help` to see all available CLI flags and examples)");
 
     // Enable live telemetry metrics in global settings
-    if let Ok(mut settings) = GLOBAL_SETTINGS.write() {
-        settings.show_metrics = true;
-        settings.device = config.hardware;
-        match config.mode {
-            PitchDetectorMode::Basic => {
-                settings.note_recognition_mode = HybridPitchDetectorMode::Mpm
-            }
-            PitchDetectorMode::Crnn => {
-                settings.note_recognition_mode = HybridPitchDetectorMode::Crnn
-            }
-            PitchDetectorMode::Hybrid => {
-                settings.note_recognition_mode = HybridPitchDetectorMode::Mpm
-            }
-        }
-    }
+    let show_metrics = true;
+    let device = config.hardware;
+    let mode = match config.mode {
+        PitchDetectorMode::Basic => HybridPitchDetectorMode::Mpm,
+        PitchDetectorMode::Crnn => HybridPitchDetectorMode::Crnn,
+        PitchDetectorMode::Hybrid => HybridPitchDetectorMode::Mpm,
+    };
+
+    let global_settings = Arc::new(Mutex::new(GlobalSettings::new(device, show_metrics, mode)));
 
     let error_cb = Arc::new(ConsoleErrorCallback);
     let (note_tx, note_rx) = RingBuffer::<Notes>::new(NOTE_RINGBUF_CAPACITY);
@@ -492,6 +486,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         "".to_string(),
         config.hardware,
         note_tx,
+        global_settings,
     );
 
     if let Some(dev_name) = &config.device {

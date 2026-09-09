@@ -1,6 +1,5 @@
 use crate::utils::audio_metrics::LiveAudioMetrics;
-use crate::utils::global_settings::GlobalSettings;
-use std::sync::{LazyLock, RwLock};
+use std::sync::LazyLock;
 
 // [polyphonic audio extractor]
 pub const MAX_POLYPHONY: usize = 16;
@@ -22,5 +21,7 @@ pub const BASIC_PITCH_HOP_SIZE: usize = 256; // 256 samples @ 22.05kHz matching 
 pub static GLOBAL_AUDIO_METRICS: LazyLock<LiveAudioMetrics> =
     LazyLock::new(|| LiveAudioMetrics::new());
 
-pub static GLOBAL_SETTINGS: LazyLock<RwLock<GlobalSettings>> =
-    LazyLock::new(|| RwLock::new(GlobalSettings::default()));
+pub struct MxlPaths {
+    pub zipped_mxl: String,
+    pub parsed_mxl: String,
+}

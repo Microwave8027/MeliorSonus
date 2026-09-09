@@ -4,9 +4,10 @@ use crate::audio_processing::instruments::notes::Notes;
 use crate::audio_processing::neural::litert_model::HardwareDelegate;
 use crate::audio_processing::processing::feature_extraction::current_feature_extractor::hybrid_extractor::PitchDetectorMode;
 use crate::tests::helpers::TestErrorCallback;
+use crate::utils::global_settings::GlobalSettings;
 use cpal::traits::{DeviceTrait, HostTrait};
 use rtrb::RingBuffer;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 #[test]
 fn test_list_input_devices() {
@@ -114,6 +115,7 @@ fn test_audio_engine_device_selection_and_switch() {
         -45.0,
         PitchDetectorMode::Basic,
         HardwareDelegate::Cpu,
+        Arc::new(Mutex::new(GlobalSettings::default())),
     );
 
     assert_eq!(engine.audio_device_name, None);

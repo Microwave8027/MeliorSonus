@@ -16,6 +16,7 @@ use crate::constants::*;
 use crate::prelude::*;
 use crate::utils::error_callback::ErrorCallback;
 use crate::utils::errors::{AudioEngineError, RustError};
+use crate::utils::global_settings::GlobalSettings;
 use crate::utils::guard::DropGuard;
 use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleFormat, Stream, StreamConfig};
@@ -38,6 +39,7 @@ pub struct AudioEngine<R: ErrorCallback> {
     pitch_detector_mode: PitchDetectorMode,
     device: HardwareDelegate,
     pub audio_device_name: Option<String>,
+    pub global_settings: Arc<Mutex<GlobalSettings>>,
 }
 
 enum EngineSignal {
@@ -56,6 +58,7 @@ impl<R: ErrorCallback> AudioEngine<R> {
         silence_threshold: f32,
         pitch_detector_mode: PitchDetectorMode,
         device: HardwareDelegate,
+        global_settings: Arc<Mutex<GlobalSettings>>,
     ) -> Self {
         AudioEngine {
             signal_tx: None,
@@ -68,6 +71,7 @@ impl<R: ErrorCallback> AudioEngine<R> {
             pitch_detector_mode: pitch_detector_mode,
             device,
             audio_device_name: None,
+            global_settings,
         }
     }
 
@@ -111,6 +115,7 @@ impl<R: ErrorCallback> AudioEngine<R> {
         let threshold = self.silence_threshold;
         let mode = self.pitch_detector_mode;
         let device = self.device;
+        let global_settings = Arc::clone(&self.global_settings);
 
         let Some(rb_prod) = self.rt_rb_prod.take() else {
             return Err("No consumer was supplied, please reset the audio engine with a producer before trying again".into());
@@ -139,6 +144,7 @@ impl<R: ErrorCallback> AudioEngine<R> {
                 threshold,
                 mode,
                 device,
+                global_settings,
             ) {
                 Ok(v) => Some(v),
                 Err(err) => {

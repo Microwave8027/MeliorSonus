@@ -4,6 +4,7 @@ pub mod audio_analysis;
 pub mod audio_processing;
 pub mod card_output;
 pub mod constants;
+pub mod entry;
 pub mod utils;
 
 #[cfg(test)]
@@ -36,14 +37,4 @@ pub mod prelude {
     pub use std::sync::atomic::{AtomicBool, Ordering};
     pub use std::sync::{Arc, Mutex};
     pub use std::thread;
-}
-
-#[derive(uniffi::Object)]
-pub struct AudioAnalyzer;
-
-impl AudioAnalyzer {
-    #[uniffi::constructor]
-    pub fn new() -> Self {
-        Self
-    }
 }

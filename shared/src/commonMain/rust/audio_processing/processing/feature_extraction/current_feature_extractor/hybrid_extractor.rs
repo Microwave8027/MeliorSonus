@@ -17,6 +17,7 @@ use crate::audio_processing::processing::functions::time_domain::keybed_thump::K
 use crate::audio_processing::processing::functions::time_domain::rms_loudness::loudness;
 use crate::constants::*;
 use crate::prelude::*;
+use crate::utils::global_settings::GlobalSettings;
 use cpal::StreamConfig;
 use rtrb::Producer;
 use std::sync::atomic::Ordering;
@@ -44,6 +45,7 @@ pub struct HybridFeatureExtractor {
     pub hfc_onset_detector: HfcOnsetDetector,
     pub nsdf_evaluator: NsdfEvaluator,
     pub filtered_sliding_window: [f32; FRAME_SIZE],
+    pub global_settings: Arc<Mutex<GlobalSettings>>,
     is_filter_initialized: bool,
     previous_hybrid_mode: Option<HybridPitchDetectorMode>,
 }
@@ -141,8 +143,8 @@ impl HybridFeatureExtractor {
         // Native MPM Fast-Path: Pitch & Clarity Tracking
         let (ph, pc) = mpm.mpm(filtered_frame, cfg, instrument);
 
-        if let Ok(proceed) = GLOBAL_SETTINGS.try_read() {
-            if proceed.show_metrics {
+        if let Ok(process) = self.global_settings.lock() {
+            if process.show_metrics {
                 GLOBAL_AUDIO_METRICS
                     .mpm_freq_bits
                     .store(ph.to_bits(), Ordering::Relaxed);
@@ -153,8 +155,8 @@ impl HybridFeatureExtractor {
         }
 
         // Note Segmentation & Pedagogical Feature Binding for MPM
-        if let Ok(proceed) = GLOBAL_SETTINGS.try_read() {
-            if proceed.note_recognition_mode == HybridPitchDetectorMode::Mpm {
+        if let Ok(process) = self.global_settings.lock() {
+            if process.note_recognition_mode == HybridPitchDetectorMode::Mpm {
                 let events = self.segmenter.process_mpm_frame(
                     (ph, pc, dbfs),
                     hfc_onset_ts,
@@ -234,6 +236,7 @@ impl DspCallBack for HybridFeatureExtractor {
         silence_threshold_dbfs: f32,
         pitch_detector_mode: PitchDetectorMode,
         device: HardwareDelegate,
+        global_settings: Arc<Mutex<GlobalSettings>>,
     ) -> Result<Self, Box<dyn Error>> {
         let mut resampler: Option<AudioResampler> = None;
         let mut transcriber: Option<Box<dyn NeuralTranscriber>> = None;
@@ -267,6 +270,7 @@ impl DspCallBack for HybridFeatureExtractor {
             filtered_sliding_window: [0.0; FRAME_SIZE],
             is_filter_initialized: false,
             previous_hybrid_mode,
+            global_settings,
         })
     }
 
@@ -314,8 +318,8 @@ impl DspCallBack for HybridFeatureExtractor {
         );
 
         // Always update telemetry metrics per incoming frame
-        if let Ok(proceed) = GLOBAL_SETTINGS.try_read() {
-            if proceed.show_metrics {
+        if let Ok(process) = self.global_settings.lock() {
+            if process.show_metrics {
                 GLOBAL_AUDIO_METRICS
                     .rms_dbfs_bits
                     .store(dbfs.to_bits(), Ordering::Relaxed);

@@ -441,9 +441,10 @@ impl StreamingNoteSegmenter {
         for (idx, &onset_prob) in output.onsets.iter().enumerate() {
             let midi_idx = idx + MIDI_OFFSET;
             let is_onset = onset_prob >= self.onset_threshold;
+            let frame_prob = output.frames.get(idx).copied().unwrap_or(0.0);
+            let is_frame_active = frame_prob >= self.frame_threshold;
 
             let loudness_opt = loudness_values.get(midi_idx).and_then(|&opt| opt);
-            let is_frame_active = loudness_opt.is_some();
             let sones = loudness_opt.map(|l| l.sones);
             let phons = loudness_opt.map(|l| l.phons);
 

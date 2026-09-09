@@ -3,6 +3,7 @@ use crate::constants::FRAME_SIZE;
 /// Computes the instantaneous crest factor (Peak-to-RMS ratio in dB) of an audio frame.
 ///
 /// High crest factor (> 16 dB) indicates a sharp, punchy, or aggressively struck transient.
+#[inline]
 pub fn compute_crest_factor(frame: &[f32; FRAME_SIZE]) -> f32 {
     if frame.is_empty() {
         return 0.0;

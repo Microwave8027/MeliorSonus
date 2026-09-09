@@ -21,6 +21,8 @@ musicxml = "1.1.2"
 symphonia = "0.6.1"
 core_affinity = "0.8.3"
 midly = "0.5.3"
+rkyv = { version = "0.8", features = ["alloc"] }
+memmap2 = "0.9" 
 
 [build-dependencies]
 bindgen = "0.72.1"

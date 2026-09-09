@@ -9,8 +9,10 @@ use crate::audio_processing::processing::functions::filters::band_pass_filter::B
 use crate::audio_processing::processing::functions::pitch::mpm::MPM;
 use crate::constants::FRAME_SIZE;
 use crate::tests::helpers::make_tone_frame;
+use crate::utils::global_settings::GlobalSettings;
 use cpal::StreamConfig;
 use rtrb::RingBuffer;
+use std::sync::{Arc, Mutex};
 
 #[test]
 fn test_hybrid_feature_extractor_pipeline_live() {
@@ -21,6 +23,7 @@ fn test_hybrid_feature_extractor_pipeline_live() {
         -45.0,
         PitchDetectorMode::Basic,
         HardwareDelegate::Cpu,
+        Arc::new(Mutex::new(GlobalSettings::default())),
     )
     .expect("valid extractor");
 
@@ -78,6 +81,7 @@ fn test_hybrid_feature_extractor_full_lifecycle() {
         -45.0,
         PitchDetectorMode::Basic,
         HardwareDelegate::Cpu,
+        Arc::new(Mutex::new(GlobalSettings::default())),
     )
     .expect("valid extractor");
 

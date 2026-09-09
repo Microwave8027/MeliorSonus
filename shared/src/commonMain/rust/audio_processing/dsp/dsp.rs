@@ -11,6 +11,7 @@ use crate::audio_processing::processing::functions::pitch::mpm::MPM;
 use crate::constants::*;
 use crate::prelude::*;
 use crate::utils::error_callback::ErrorCallback;
+use crate::utils::global_settings::GlobalSettings;
 use cpal::StreamConfig;
 use std::error::Error;
 use std::sync::Arc;
@@ -34,6 +35,7 @@ pub trait DspCallBack: Send + 'static + Sized {
         silence_threshold_dbfs: f32,
         pitch_detector_mode: PitchDetectorMode,
         device: HardwareDelegate,
+        global_settings: Arc<Mutex<GlobalSettings>>,
     ) -> Result<Self, Box<dyn Error>>;
     fn dsp_callback(
         &mut self,
@@ -53,6 +55,7 @@ pub struct Dsp<R: ErrorCallback> {
     pub silence_threshold: f32,
     error_callback: Arc<R>,
     pub audio_engine: AudioEngine<R>,
+    pub global_settings: Arc<Mutex<GlobalSettings>>,
 }
 
 impl<R: ErrorCallback> Dsp<R> {
@@ -65,6 +68,7 @@ impl<R: ErrorCallback> Dsp<R> {
         onnx_runtime_model: String,
         device: HardwareDelegate,
         note_rb_prod: Producer<Notes>,
+        global_settings: Arc<Mutex<GlobalSettings>>,
     ) -> Self {
         let _ = TFLITE_MODEL_PATH.set(tflite_runtime_model);
         let _ = ONNX_MODEL_PATH.set(onnx_runtime_model);
@@ -75,6 +79,7 @@ impl<R: ErrorCallback> Dsp<R> {
             silence_threshold,
             pitch_detector_mode,
             device,
+            Arc::clone(&global_settings),
         );
 
         Self {
@@ -82,6 +87,7 @@ impl<R: ErrorCallback> Dsp<R> {
             silence_threshold,
             error_callback,
             audio_engine,
+            global_settings,
         }
     }
 
