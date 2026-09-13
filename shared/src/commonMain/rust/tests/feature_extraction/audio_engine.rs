@@ -23,7 +23,6 @@ fn test_hybrid_feature_extractor_audio_engine_direct_integration() {
         44100,
         -45.0,
         PitchDetectorMode::Basic,
-        HardwareDelegate::Cpu,
         Arc::new(Mutex::new(GlobalSettings::default())),
     )
     .expect("valid extractor");
@@ -87,7 +86,6 @@ fn test_hybrid_feature_extractor_audio_engine_direct_integration() {
         prod2,
         -45.0,
         PitchDetectorMode::Basic,
-        HardwareDelegate::Cpu,
         Arc::new(Mutex::new(GlobalSettings::default())),
     );
     assert!(!engine.is_playing.load(std::sync::atomic::Ordering::Relaxed));

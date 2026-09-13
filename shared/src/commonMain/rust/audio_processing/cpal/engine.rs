@@ -13,7 +13,7 @@ use crate::audio_processing::instruments::instrument::Instrument;
 use crate::audio_processing::processing::functions::filters::band_pass_filter::BandPassFilter;
 use crate::audio_processing::processing::functions::pitch::mpm::MPM;
 use crate::constants::*;
-use crate::prelude::*;
+use crate::audio_processing::Notes;
 use crate::utils::error_callback::ErrorCallback;
 use crate::utils::errors::{AudioEngineError, RustError};
 use crate::utils::global_settings::GlobalSettings;
@@ -22,22 +22,21 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleFormat, Stream, StreamConfig};
 use rtrb::{Consumer, Producer, RingBuffer};
 use std::error::Error;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, TryRecvError};
 use std::thread;
 use std::time::Duration;
 
-pub struct AudioEngine<R: ErrorCallback> {
+pub struct AudioEngine {
     signal_tx: Option<mpsc::Sender<EngineSignal>>,
     pub is_playing: Arc<AtomicBool>,
-    error_callback: Arc<R>,
+    error_callback: Arc<dyn ErrorCallback>,
     supervisor_handle: Option<thread::JoinHandle<()>>,
     instrument: Arc<Instrument>,
     rt_rb_prod: Option<Producer<Notes>>, //used for notes not buffers
     silence_threshold: f32,
     pitch_detector_mode: PitchDetectorMode,
-    device: HardwareDelegate,
     pub audio_device_name: Option<String>,
     pub global_settings: Arc<Mutex<GlobalSettings>>,
 }
@@ -50,14 +49,13 @@ enum EngineSignal {
     Error { message: String }, // This type of error is always retryable
 }
 
-impl<R: ErrorCallback> AudioEngine<R> {
+impl AudioEngine {
     pub fn new(
         instrument: Instrument,
-        error_callback: Arc<R>,
+        error_callback: Arc<dyn ErrorCallback>,
         rtrb_prod: Producer<Notes>,
         silence_threshold: f32,
         pitch_detector_mode: PitchDetectorMode,
-        device: HardwareDelegate,
         global_settings: Arc<Mutex<GlobalSettings>>,
     ) -> Self {
         AudioEngine {
@@ -69,7 +67,6 @@ impl<R: ErrorCallback> AudioEngine<R> {
             rt_rb_prod: Some(rtrb_prod),
             silence_threshold,
             pitch_detector_mode: pitch_detector_mode,
-            device,
             audio_device_name: None,
             global_settings,
         }
@@ -114,7 +111,6 @@ impl<R: ErrorCallback> AudioEngine<R> {
         let error_callback = Arc::clone(&self.error_callback);
         let threshold = self.silence_threshold;
         let mode = self.pitch_detector_mode;
-        let device = self.device;
         let global_settings = Arc::clone(&self.global_settings);
 
         let Some(rb_prod) = self.rt_rb_prod.take() else {
@@ -143,7 +139,6 @@ impl<R: ErrorCallback> AudioEngine<R> {
                 config.as_ref().unwrap().sample_rate,
                 threshold,
                 mode,
-                device,
                 global_settings,
             ) {
                 Ok(v) => Some(v),
@@ -635,7 +630,7 @@ impl<R: ErrorCallback> AudioEngine<R> {
     }
 }
 
-impl<R: ErrorCallback> Drop for AudioEngine<R> {
+impl Drop for AudioEngine {
     fn drop(&mut self) {
         self.end()
     }

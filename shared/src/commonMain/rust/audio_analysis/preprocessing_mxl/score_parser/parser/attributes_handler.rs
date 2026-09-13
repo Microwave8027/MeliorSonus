@@ -15,6 +15,17 @@ pub fn handle_attributes(
         state.current_divisions = *div.content;
     }
 
+    for transpose in &attrs.content.transpose {
+        let chromatic = *transpose.content.chromatic.content as i8;
+        let octave = transpose
+            .content
+            .octave_change
+            .as_ref()
+            .map(|o| o.content)
+            .unwrap_or(0);
+        state.current_transpose_semitones = chromatic.saturating_add(octave.saturating_mul(12));
+    }
+
     for clef in &attrs.content.clef {
         let sign = match clef.content.sign.content {
             datatypes::ClefSign::G => ClefSign::G,

@@ -4,8 +4,14 @@ use crate::audio_processing::processing::functions::articulation::articulation_c
 };
 use crate::audio_processing::processing::functions::spectral::sones_to_phons;
 
+uniffi::custom_type!(u128, u64, {
+    remote,
+    lower: |val: u128| val as u64,
+    try_lift: |val: u64| Ok(val as u128),
+});
+
 /// Dynamic classification level based on acoustic decibels relative to full scale or perceived loudness level in Phons.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(uniffi::Enum, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DynamicLevel {
     Pianississimo, // ppp (< -45 dBFS / < 34 Phons)
     Pianissimo,    // pp  (-45 to -38 dBFS / 34 to 42 Phons)
@@ -60,7 +66,7 @@ impl DynamicLevel {
 }
 
 /// Damping profile upon note release (staccato key release vs. pedaled sustain).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(uniffi::Enum, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum DampingProfile {
     DryDamped,      // Sharp, rapid energy cutoff (< 60ms)
     PedalSustained, // Exponential long ring-out / damper lifted (> 1.5s)
@@ -94,7 +100,7 @@ pub fn calculate_midi_velocity(loudness_dbfs: f32, crest_factor: f32) -> u8 {
 /// * `mpm_clarity: Option<f32>` — McLeod Pitch Method normalized square difference (NSDF) periodicity confidence at onset. Range: `Some(0.0..=1.0)` (monophonic path) or `None` (polyphonic / uncalculated).
 /// * `velocity: u8` — Calibrated MIDI strike velocity. Range: `1` to `127`.
 /// * `dynamic: DynamicLevel` — Standard musical dynamic marking (ppp to fff).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(uniffi::Record, Clone, Debug, PartialEq)]
 pub struct StartNote {
     pub pitch: Pitch,
     pub octave: Octave,
@@ -110,7 +116,7 @@ pub struct StartNote {
     pub dynamic: DynamicLevel,
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(uniffi::Enum, Clone, Copy, Debug, PartialEq, Eq)]
 pub enum NoteArticulation {
     Normal,
     Staccato,
@@ -146,7 +152,7 @@ pub enum NoteArticulation {
 /// * `velocity: u8` — Calibrated MIDI strike velocity. Range: `1` to `127`.
 /// * `dynamic: DynamicLevel` — Standard musical dynamic marking (ppp to fff).
 /// * `damping: DampingProfile` — Damping state upon release (DryDamped, PedalSustained, HalfPedal).
-#[derive(Clone, Debug, PartialEq)]
+#[derive(uniffi::Record, Clone, Debug, PartialEq)]
 pub struct EndNote {
     pub pitch: Pitch,
     pub octave: Octave,
@@ -171,11 +177,14 @@ pub struct EndNote {
     pub damping: DampingProfile,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(uniffi::Enum, Clone, Debug, PartialEq)]
 pub enum Notes {
     Start(StartNote),
     End(EndNote),
 }
+
+unsafe impl Send for Notes {}
+unsafe impl Sync for Notes {}
 
 impl Notes {
     pub fn is_start(&self) -> bool {
@@ -588,7 +597,7 @@ impl RecordNote {
     }
 }
 
-#[derive(PartialEq, Eq, Hash, Clone, Copy, Debug)]
+#[derive(uniffi::Enum, PartialEq, Eq, Hash, Clone, Copy, Debug)]
 pub enum Pitch {
     None,
     C,
@@ -605,7 +614,7 @@ pub enum Pitch {
     B,
 }
 
-#[derive(PartialEq, Eq, Hash, Clone, Copy, Debug)]
+#[derive(uniffi::Enum, PartialEq, Eq, Hash, Clone, Copy, Debug)]
 pub enum Octave {
     OutOfRange,
     #[allow(non_camel_case_types)]

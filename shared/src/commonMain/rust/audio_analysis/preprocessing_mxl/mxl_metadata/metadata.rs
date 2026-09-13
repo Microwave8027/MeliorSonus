@@ -14,7 +14,12 @@ pub struct MxlMetaData {
 
 impl MxlMetaData {
     pub fn from(contents: &ScoreTimewiseContents) -> Self {
-        let movement_title = contents.movement_title.as_ref().map(|m| m.content.clone());
+        parse_mxl_metadata(contents)
+    }
+}
+
+pub fn parse_mxl_metadata(contents: &ScoreTimewiseContents) -> MxlMetaData {
+    let movement_title = contents.movement_title.as_ref().map(|m| m.content.clone());
         let movement_number = contents.movement_number.as_ref().map(|m| m.content.clone());
         let work_title = contents
             .work
@@ -79,16 +84,42 @@ impl MxlMetaData {
             })
             .unwrap_or_else(|| "Unknown Composer".to_string());
 
-        let instruments: Vec<String> = contents
-            .part_list
-            .content
-            .content
-            .iter()
-            .filter_map(|elem| match elem {
-                PartListElement::ScorePart(part) => Some(part.content.part_name.content.clone()),
-                _ => None,
-            })
-            .collect();
+        let mut current_group: Option<String> = None;
+        let mut instruments: Vec<String> = Vec::new();
+
+        for elem in &contents.part_list.content.content {
+            match elem {
+                PartListElement::PartGroup(group) => match group.attributes.r#type {
+                    musicxml::datatypes::StartStop::Start => {
+                        current_group = group
+                            .content
+                            .group_name
+                            .as_ref()
+                            .map(|g| g.content.trim().to_string())
+                            .filter(|g| !g.is_empty());
+                    }
+                    musicxml::datatypes::StartStop::Stop => {
+                        current_group = None;
+                    }
+                },
+                PartListElement::ScorePart(part) => {
+                    let part_name = part.content.part_name.content.trim().to_string();
+                    let full_name = match &current_group {
+                        Some(group) => {
+                            if part_name.is_empty() {
+                                group.clone()
+                            } else if part_name.to_lowercase().contains(&group.to_lowercase()) {
+                                part_name
+                            } else {
+                                format!("{group} - {part_name}")
+                            }
+                        }
+                        None => part_name,
+                    };
+                    instruments.push(full_name);
+                }
+            }
+        }
 
         let part_list_type = if instruments.len() > 1 {
             PartListType::Parts(instruments.len() as u32)
@@ -132,4 +163,3 @@ impl MxlMetaData {
             part_list_type,
         }
     }
-}

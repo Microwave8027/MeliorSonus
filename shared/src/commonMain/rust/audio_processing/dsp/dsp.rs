@@ -2,20 +2,19 @@
  * MELIORSONUS DSP AUDIO PIPELINE & FEATURE EXTRACTION COORDINATOR
  */
 
+use crate::audio_processing::Notes;
 use crate::audio_processing::PitchDetectorMode;
 use crate::audio_processing::cpal::engine::AudioEngine;
 use crate::audio_processing::instruments::instrument::Instrument;
-use crate::audio_processing::instruments::notes::Notes;
 use crate::audio_processing::processing::functions::filters::band_pass_filter::BandPassFilter;
 use crate::audio_processing::processing::functions::pitch::mpm::MPM;
 use crate::constants::*;
-use crate::prelude::*;
 use crate::utils::error_callback::ErrorCallback;
 use crate::utils::global_settings::GlobalSettings;
 use cpal::StreamConfig;
+use rtrb::Producer;
 use std::error::Error;
-use std::sync::Arc;
-use std::sync::OnceLock;
+use std::sync::{Arc, Mutex, OnceLock};
 
 pub static ONNX_MODEL_PATH: OnceLock<String> = OnceLock::new();
 pub static TFLITE_MODEL_PATH: OnceLock<String> = OnceLock::new();
@@ -34,7 +33,6 @@ pub trait DspCallBack: Send + 'static + Sized {
         sample_rate: u32,
         silence_threshold_dbfs: f32,
         pitch_detector_mode: PitchDetectorMode,
-        device: HardwareDelegate,
         global_settings: Arc<Mutex<GlobalSettings>>,
     ) -> Result<Self, Box<dyn Error>>;
     fn dsp_callback(
@@ -50,35 +48,33 @@ pub trait DspCallBack: Send + 'static + Sized {
     }
 }
 
-pub struct Dsp<R: ErrorCallback> {
+pub struct Dsp {
     pub instrument: Instrument,
     pub silence_threshold: f32,
-    error_callback: Arc<R>,
-    pub audio_engine: AudioEngine<R>,
+    error_callback: Arc<dyn ErrorCallback>,
+    pub audio_engine: AudioEngine,
     pub global_settings: Arc<Mutex<GlobalSettings>>,
 }
 
-impl<R: ErrorCallback> Dsp<R> {
+impl Dsp {
     pub fn new(
         instrument: Instrument,
         silence_threshold: f32,
-        error_callback: Arc<R>,
+        error_callback: Arc<dyn ErrorCallback>,
         pitch_detector_mode: PitchDetectorMode,
         tflite_runtime_model: String,
         onnx_runtime_model: String,
-        device: HardwareDelegate,
         note_rb_prod: Producer<Notes>,
         global_settings: Arc<Mutex<GlobalSettings>>,
     ) -> Self {
         let _ = TFLITE_MODEL_PATH.set(tflite_runtime_model);
         let _ = ONNX_MODEL_PATH.set(onnx_runtime_model);
-        let audio_engine = AudioEngine::<R>::new(
+        let audio_engine = AudioEngine::new(
             instrument,
             Arc::clone(&error_callback),
             note_rb_prod,
             silence_threshold,
             pitch_detector_mode,
-            device,
             Arc::clone(&global_settings),
         );
 
@@ -91,7 +87,7 @@ impl<R: ErrorCallback> Dsp<R> {
         }
     }
 
-    pub fn error_callback(&self) -> &Arc<R> {
+    pub fn error_callback(&self) -> &Arc<dyn ErrorCallback> {
         &self.error_callback
     }
 

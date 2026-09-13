@@ -14,19 +14,19 @@ pub enum RepeatVariant {
 
 impl RepeatVariant {
     pub fn is_start(&self) -> bool {
-        matches!(self, RepeatVariant::Start(_))
+        return matches!(self, RepeatVariant::Start(_));
     }
 
     pub fn is_end(&self) -> bool {
-        matches!(self, RepeatVariant::End(_))
+        return matches!(self, RepeatVariant::End(_));
     }
 
     pub fn is_ending(&self) -> bool {
-        matches!(self, RepeatVariant::Ending(_))
+        return matches!(self, RepeatVariant::Ending(_));
     }
 
     pub fn is_jump(&self) -> bool {
-        matches!(self, RepeatVariant::Jump(_))
+        return matches!(self, RepeatVariant::Jump(_));
     }
 
     pub fn as_start(&self) -> Option<&RepeatStart> {

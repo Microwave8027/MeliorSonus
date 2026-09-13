@@ -38,7 +38,8 @@ impl DynamicLevel {
             DynamicLevel::MezzoForte => crate::audio_processing::instruments::notes::DynamicLevel::MezzoForte,
             DynamicLevel::Forte => crate::audio_processing::instruments::notes::DynamicLevel::Forte,
             DynamicLevel::Fortissimo => crate::audio_processing::instruments::notes::DynamicLevel::Fortissimo,
-            DynamicLevel::Fortississimo | DynamicLevel::Other => crate::audio_processing::instruments::notes::DynamicLevel::Fortississimo,
+            DynamicLevel::Fortississimo => crate::audio_processing::instruments::notes::DynamicLevel::Fortississimo,
+            DynamicLevel::Other => crate::audio_processing::instruments::notes::DynamicLevel::MezzoForte,
         }
     }
 }

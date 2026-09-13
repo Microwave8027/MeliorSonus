@@ -22,7 +22,6 @@ fn test_hybrid_feature_extractor_pipeline_live() {
         44100,
         -45.0,
         PitchDetectorMode::Basic,
-        HardwareDelegate::Cpu,
         Arc::new(Mutex::new(GlobalSettings::default())),
     )
     .expect("valid extractor");
@@ -80,7 +79,6 @@ fn test_hybrid_feature_extractor_full_lifecycle() {
         44100,
         -45.0,
         PitchDetectorMode::Basic,
-        HardwareDelegate::Cpu,
         Arc::new(Mutex::new(GlobalSettings::default())),
     )
     .expect("valid extractor");

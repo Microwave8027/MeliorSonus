@@ -1,9 +1,6 @@
 use crate::audio_analysis::mxl_metadata::ArchivedMxlMetaData;
 use crate::audio_analysis::score_parser::ArchivedSequentialMusicScore;
 use memmap2::Mmap;
-use std::path::Path;
-
-pub type StaticArcPath = &'static Path;
 
 pub struct BorrowedMxlScore {
     pub(crate) ptr: *const ArchivedSequentialMusicScore,

@@ -7,4 +7,5 @@ pub struct RestInfo {
     pub duration: u32,
     pub voice: u32,
     pub staff: u32,
+    pub part_index: u32,
 }

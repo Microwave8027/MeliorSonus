@@ -1,6 +1,8 @@
-use crate::audio_processing::{HardwareDelegate, PitchDetectionModel};
+use crate::audio_processing::PitchDetectionModel;
 // note to self: The rubato implementation returns a result error but only does so if the parameters are zero. Make sure not to pass in any zero parameters into the resampler
-use crate::audio_processing::dsp::{CallBackParameters, DspCallBack};
+use crate::audio_processing::dsp::{
+    CallBackParameters, DspCallBack, ONNX_MODEL_PATH, TFLITE_MODEL_PATH,
+};
 use crate::audio_processing::instruments::instrument::{Instrument, InstrumentAcousticProfile};
 use crate::audio_processing::instruments::notes::*;
 use crate::audio_processing::neural::{
@@ -16,11 +18,12 @@ use crate::audio_processing::processing::functions::time_domain::crest_factor::c
 use crate::audio_processing::processing::functions::time_domain::keybed_thump::KeybedThumpDetector;
 use crate::audio_processing::processing::functions::time_domain::rms_loudness::loudness;
 use crate::constants::*;
-use crate::prelude::*;
 use crate::utils::global_settings::GlobalSettings;
 use cpal::StreamConfig;
 use rtrb::Producer;
+use std::error::Error;
 use std::sync::atomic::Ordering;
+use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Hybrid Real-Time Feature Extractor coordinating:
@@ -235,7 +238,6 @@ impl DspCallBack for HybridFeatureExtractor {
         sample_rate: u32,
         silence_threshold_dbfs: f32,
         pitch_detector_mode: PitchDetectorMode,
-        device: HardwareDelegate,
         global_settings: Arc<Mutex<GlobalSettings>>,
     ) -> Result<Self, Box<dyn Error>> {
         let mut resampler: Option<AudioResampler> = None;
@@ -244,11 +246,16 @@ impl DspCallBack for HybridFeatureExtractor {
         if pitch_detector_mode == PitchDetectorMode::Crnn
             || pitch_detector_mode == PitchDetectorMode::Hybrid
         {
+            let Ok(setting) = global_settings.lock() else {
+                return Err(
+                    "Global Settings is poisoned or being stalled by another thread".into(),
+                );
+            };
             resampler = Some(AudioResampler::new(sample_rate, CRNN_INPUT_SIZE, HOP_SIZE));
             transcriber = Some(Box::new(PitchDetector::new(
                 TFLITE_MODEL_PATH.get().unwrap_or(&"".to_string()),
                 ONNX_MODEL_PATH.get().unwrap_or(&"".to_string()),
-                device,
+                setting.device,
             )?));
         }
         let segmenter = StreamingNoteSegmenter::new(ONSET_THRESHOLD, FRAME_THRESHOLD, sample_rate);

@@ -1,6 +1,7 @@
 use super::articulation::NoteArticulation;
 use super::dynamic::DynamicLevel;
 use super::octave::Octave;
+use super::ornament::OrnamentKind;
 use super::pitch::Pitch;
 use super::tie::TieType;
 use rkyv::{Archive, Deserialize, Serialize};
@@ -20,6 +21,17 @@ pub struct StartNote {
     pub voice: u32,
     pub staff: u32,
     pub is_grace: bool,
+    pub tie: TieType,
+    pub part_index: u32,
+    pub has_fermata: bool,
+    pub ornament: Option<OrnamentKind>,
+}
+
+impl StartNote {
+    /// Returns true if this note is a continuation of a tie from a previous note (and thus has no audio onset strike).
+    pub fn is_tied_continuation(&self) -> bool {
+        matches!(self.tie, TieType::Stop | TieType::Continue)
+    }
 }
 
 /// Represents the completed evaluation of a musical note, comparable to `EndNote` in audio processing.
@@ -40,6 +52,10 @@ pub struct EndNote {
     pub voice: u32,
     pub staff: u32,
     pub is_grace: bool,
+    pub part_index: u32,
+    pub has_fermata: bool,
+    pub ornament: Option<OrnamentKind>,
+    pub is_pedaled: bool,
 }
 
 /// Enum representing either note onset or note completion.

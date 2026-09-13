@@ -1,3 +1,5 @@
+#![allow(unused_imports)]
+
 pub mod audio_matching;
 pub mod preprocessing_mxl;
 pub mod score_matching;

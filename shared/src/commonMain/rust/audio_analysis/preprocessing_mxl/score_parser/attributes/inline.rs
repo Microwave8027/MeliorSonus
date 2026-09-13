@@ -1,4 +1,5 @@
 use super::clef::ClefSign;
+use super::pedal::PedalType;
 use super::tempo::TempoChangeKind;
 use super::wedge::WedgeType;
 use crate::audio_analysis::score_parser::notes::DynamicLevel;
@@ -19,6 +20,9 @@ pub enum InlineAttributeKind {
     Wedge {
         wedge_type: WedgeType,
     },
+    Pedal {
+        pedal_type: PedalType,
+    },
     Clef {
         sign: ClefSign,
         line: Option<i8>,
@@ -30,6 +34,10 @@ pub enum InlineAttributeKind {
     TimeSignature {
         beats: u32,
         beat_type: u32,
+    },
+    Divisions(u32),
+    OctaveShift {
+        semitones: i8,
     },
     DirectionWords(String),
 }

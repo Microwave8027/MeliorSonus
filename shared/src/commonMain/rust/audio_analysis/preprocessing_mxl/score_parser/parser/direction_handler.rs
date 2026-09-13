@@ -1,12 +1,12 @@
 use super::sound_handler::handle_sound;
 use super::state::ParserState;
 use crate::audio_analysis::score_parser::attributes::{
-    InlineAttributeKind, InlineMeasureAttributes, TempoChangeKind, WedgeType,
+    InlineAttributeKind, InlineMeasureAttributes, PedalType, TempoChangeKind, WedgeType,
 };
 use crate::audio_analysis::score_parser::notes::DynamicLevel;
 use crate::audio_analysis::score_parser::repeats::{JumpKind, RepeatJump, RepeatVariant};
 use musicxml::datatypes;
-use musicxml::elements::{Direction, DirectionTypeContents, DynamicsType};
+use musicxml::elements::{BeatEquation, Direction, DirectionTypeContents, DynamicsType, MetronomeContents};
 
 pub fn handle_direction(
     direction: &Direction,
@@ -153,6 +153,72 @@ pub fn handle_direction(
                     kind: InlineAttributeKind::Wedge { wedge_type },
                 });
             }
+            DirectionTypeContents::Metronome(metronome) => {
+                if let MetronomeContents::BeatBased(beat_based) = &metronome.content {
+                    if let BeatEquation::BPM(per_minute) = &beat_based.equals {
+                        if let Ok(bpm_val) = per_minute.content.trim().parse::<f64>() {
+                            let bpm_u32 = bpm_val.round() as u32;
+                            state.current_bpm = Some(bpm_u32);
+                            inline_attrs.push(InlineMeasureAttributes {
+                                division_offset,
+                                kind: InlineAttributeKind::TempoChange {
+                                    bpm: Some(bpm_u32),
+                                    kind: TempoChangeKind::BpmChange,
+                                    text: format!("{} BPM", bpm_u32),
+                                },
+                            });
+                        }
+                    }
+                }
+            }
+            DirectionTypeContents::Pedal(pedal) => {
+                let p_type = match pedal.attributes.r#type {
+                    datatypes::PedalType::Start
+                    | datatypes::PedalType::Continue
+                    | datatypes::PedalType::Resume => {
+                        state.is_pedal_active = true;
+                        PedalType::Start
+                    }
+                    datatypes::PedalType::Stop | datatypes::PedalType::Discontinue => {
+                        state.is_pedal_active = false;
+                        PedalType::Stop
+                    }
+                    datatypes::PedalType::Sostenuto => {
+                        state.is_pedal_active = true;
+                        PedalType::Sostenuto
+                    }
+                    datatypes::PedalType::Change => {
+                        state.is_pedal_active = true;
+                        PedalType::Change
+                    }
+                };
+                inline_attrs.push(InlineMeasureAttributes {
+                    division_offset,
+                    kind: InlineAttributeKind::Pedal {
+                        pedal_type: p_type,
+                    },
+                });
+            }
+            DirectionTypeContents::OctaveShift(shift) => {
+                let size = shift.attributes.size.as_ref().map(|s| s.0 as i8).unwrap_or(8);
+                let semitones = match size {
+                    15 => 24,
+                    _ => 12,
+                };
+                let shift_val = match shift.attributes.r#type {
+                    datatypes::UpDownStopContinue::Down => semitones,
+                    datatypes::UpDownStopContinue::Up => -semitones,
+                    datatypes::UpDownStopContinue::Stop => 0,
+                    datatypes::UpDownStopContinue::Continue => state.current_octave_shift,
+                };
+                state.current_octave_shift = shift_val;
+                inline_attrs.push(InlineMeasureAttributes {
+                    division_offset,
+                    kind: InlineAttributeKind::OctaveShift {
+                        semitones: shift_val,
+                    },
+                });
+            }
             DirectionTypeContents::Segno(_) => {
                 repeats.push((
                     division_offset,
@@ -192,6 +258,15 @@ pub fn dynamic_from_dynamics_type(dt: &DynamicsType) -> DynamicLevel {
         | DynamicsType::Ffff(_)
         | DynamicsType::Fffff(_)
         | DynamicsType::Ffffff(_) => DynamicLevel::Fortississimo,
+        DynamicsType::Sf(_)
+        | DynamicsType::Sfz(_)
+        | DynamicsType::Sffz(_)
+        | DynamicsType::Fz(_)
+        | DynamicsType::Rf(_)
+        | DynamicsType::Rfz(_) => DynamicLevel::Fortissimo,
+        DynamicsType::Fp(_)
+        | DynamicsType::Sfp(_)
+        | DynamicsType::Sfzp(_) => DynamicLevel::Forte,
         _ => DynamicLevel::Other,
     }
 }
@@ -206,6 +281,8 @@ pub fn dynamic_from_word(word: &str) -> Option<DynamicLevel> {
         "f" | "forte" => Some(DynamicLevel::Forte),
         "ff" | "fortissimo" => Some(DynamicLevel::Fortissimo),
         "fff" | "fortississimo" => Some(DynamicLevel::Fortississimo),
+        "sf" | "sfz" | "sffz" | "fz" | "rf" | "rfz" => Some(DynamicLevel::Fortissimo),
+        "fp" | "sfp" => Some(DynamicLevel::Forte),
         _ => None,
     }
 }

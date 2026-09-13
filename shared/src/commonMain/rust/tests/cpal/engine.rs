@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 
 #[test]
 fn test_list_input_devices() {
-    let devices_res = AudioEngine::<TestErrorCallback>::list_input_devices();
+    let devices_res = AudioEngine::list_input_devices();
     assert!(
         devices_res.is_ok(),
         "list_input_devices should return Ok: {:?}",
@@ -40,7 +40,7 @@ fn test_list_input_devices() {
     // Verify indices are sequential
     for (i, (idx, _name, _)) in devices.iter().enumerate() {
         assert_eq!(*idx, i, "Device index should match its enumerated position");
-        if let Ok(dev) = AudioEngine::<TestErrorCallback>::find_input_device(&cpal::default_host(), &i.to_string()) {
+        if let Ok(dev) = AudioEngine::find_input_device(&cpal::default_host(), &i.to_string()) {
             if let Ok(def_cfg) = dev.default_input_config() {
                 println!("    Default config: sample_rate={}, channels={}, format={:?}", def_cfg.sample_rate(), def_cfg.channels(), def_cfg.sample_format());
             }
@@ -62,16 +62,16 @@ fn test_find_input_device() {
         let device_list: Vec<_> = devices.collect();
         if !device_list.is_empty() {
             // 1. Find by index string
-            let dev_by_idx = AudioEngine::<TestErrorCallback>::find_input_device(&host, "0");
+            let dev_by_idx = AudioEngine::find_input_device(&host, "0");
             assert!(
                 dev_by_idx.is_ok(),
                 "Finding input device by index '0' should succeed"
             );
 
             // 2. Find by exact device name
-            let first_name = AudioEngine::<TestErrorCallback>::get_device_name(&device_list[0]);
+            let first_name = AudioEngine::get_device_name(&device_list[0]);
             let dev_by_name =
-                AudioEngine::<TestErrorCallback>::find_input_device(&host, &first_name);
+                AudioEngine::find_input_device(&host, &first_name);
             assert!(
                 dev_by_name.is_ok(),
                 "Finding input device by exact name '{}' should succeed",
@@ -79,7 +79,7 @@ fn test_find_input_device() {
             );
 
             // 3. Find by case-insensitive name
-            let dev_by_lower = AudioEngine::<TestErrorCallback>::find_input_device(
+            let dev_by_lower = AudioEngine::find_input_device(
                 &host,
                 &first_name.to_lowercase(),
             );
@@ -92,7 +92,7 @@ fn test_find_input_device() {
 
     // 4. Finding a non-existent device should return an error with a helpful message
     let non_existent =
-        AudioEngine::<TestErrorCallback>::find_input_device(&host, "__invalid_mock_device_12345__");
+        AudioEngine::find_input_device(&host, "__invalid_mock_device_12345__");
     assert!(
         non_existent.is_err(),
         "Finding non-existent device should return Err"
@@ -114,7 +114,6 @@ fn test_audio_engine_device_selection_and_switch() {
         prod,
         -45.0,
         PitchDetectorMode::Basic,
-        HardwareDelegate::Cpu,
         Arc::new(Mutex::new(GlobalSettings::default())),
     );
 

@@ -1,4 +1,4 @@
-use crate::{audio_processing::HybridPitchDetectorMode, prelude::*};
+use crate::audio_processing::{HardwareDelegate, HybridPitchDetectorMode};
 
 /// When editing this, the audio engine MUST BE PAUSED
 pub struct GlobalSettings {

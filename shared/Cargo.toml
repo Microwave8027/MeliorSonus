@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-uniffi = "0.29.4"
+uniffi = { version = "0.29.4", features = ["cli"] }
 cpal = "0.18.1"
 # log = "0.4"
 # android_logger = "0.13"
@@ -18,9 +18,6 @@ arrayvec = "0.7"
 tract-onnx = "0.21"
 dtw_rs = "0.10.0"
 musicxml = "1.1.2"
-symphonia = "0.6.1"
-core_affinity = "0.8.3"
-midly = "0.5.3"
 rkyv = { version = "0.8", features = ["alloc"] }
 memmap2 = "0.9" 
 
@@ -33,4 +30,16 @@ path = "src/commonMain/rust/lib.rs"
 
 [[example]]
 name = "mic_listener"
-path = "rust_examples/mic_listener.rs"
+path = "scripts/rust_examples/mic_listener.rs"
+
+[[example]]
+name = "audio_visualizer"
+crate-type = ["cdylib"]
+path = "scripts/rust_examples/audio_visualizer/noise_visualizer.rs"
+
+[dev-dependencies]
+eframe = "0.36"
+egui_plot = "0.37"
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.12", features = ["stream"] }
+uniffi = "0.29.4"
