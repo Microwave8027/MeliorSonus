@@ -130,3 +130,125 @@ fn test_hybrid_feature_extractor_full_lifecycle() {
         assert!(e.note_duration > 0.05);
     }
 }
+
+#[test]
+fn test_hybrid_feature_extractor_bytedance_crnn_pipeline() {
+    let (prod, _cons) = RingBuffer::<Notes>::new(64);
+    let settings = Arc::new(Mutex::new(GlobalSettings {
+        device: HardwareDelegate::Cpu,
+        show_metrics: true,
+        note_recognition_mode: crate::audio_processing::HybridPitchDetectorMode::Crnn,
+        crnn_type: crate::audio_processing::CrnnType::ByteDance,
+    }));
+
+    let mut extractor = HybridFeatureExtractor::new(
+        prod,
+        48000,
+        -45.0,
+        PitchDetectorMode::Crnn,
+        settings,
+    )
+    .expect("valid extractor with ByteDance CRNN");
+
+    assert_eq!(extractor.crnn_type, crate::audio_processing::CrnnType::ByteDance);
+    assert!(extractor.resampler_16k.is_some());
+    assert!(extractor.bytedance_crnn.is_some());
+
+    let cfg = StreamConfig {
+        channels: 1,
+        sample_rate: 48000,
+        buffer_size: cpal::BufferSize::Default,
+    };
+    let mut filter = BandPassFilter::new(30.0, 10000.0, 48000);
+    let instrument = Instrument::Piano;
+    let mut mpm = MPM::new(FRAME_SIZE / 2);
+
+    let a4_frame = make_tone_frame(440.0, 0.7, 48000);
+
+    // Process 20 frames of audio at 48 kHz (512-sample hops = ~10.67ms each)
+    // Resamples 48k -> 16k (3:1 integer decimation), pushes ~171 samples per hop into 16k FIFO.
+    // Every ~2 hops (342 samples >= 320), Slaney Mel STFT and CRNN inference are triggered.
+    for _ in 0..20 {
+        extractor.dsp_callback(CallBackParameters {
+            buffer: &a4_frame,
+            cfg: &cfg,
+            filter: &mut filter,
+            instrument: &instrument,
+            mpm: &mut mpm,
+        });
+    }
+
+    // Extractor must process smoothly without panic
+    assert!(extractor.processed_samples > 0);
+}
+
+#[test]
+fn test_hybrid_feature_extractor_mode_and_crnn_switch() {
+    let (prod, _cons) = RingBuffer::<Notes>::new(64);
+    let settings = Arc::new(Mutex::new(GlobalSettings {
+        device: HardwareDelegate::Cpu,
+        show_metrics: false,
+        note_recognition_mode: crate::audio_processing::HybridPitchDetectorMode::Crnn,
+        crnn_type: crate::audio_processing::CrnnType::ByteDance,
+    }));
+
+    let mut extractor = HybridFeatureExtractor::new(
+        prod,
+        44100,
+        -50.0,
+        PitchDetectorMode::Crnn,
+        settings,
+    )
+    .expect("valid extractor");
+
+    assert_eq!(extractor.crnn_type, crate::audio_processing::CrnnType::ByteDance);
+    assert!(extractor.resampler_16k.is_some());
+    assert!(extractor.bytedance_crnn.is_some());
+    assert!(extractor.resampler.is_none());
+    assert!(extractor.transcriber.is_none());
+
+    // Switch to BasicPitch
+    extractor.change_crnn_type(crate::audio_processing::CrnnType::BasicPitch);
+    assert_eq!(extractor.crnn_type, crate::audio_processing::CrnnType::BasicPitch);
+    assert!(extractor.resampler_16k.is_none());
+    assert!(extractor.bytedance_crnn.is_none());
+    assert!(extractor.resampler.is_some());
+    assert!(extractor.transcriber.is_some());
+
+    // Switch to Basic mode (pure MPM)
+    extractor.change_mode(PitchDetectorMode::Basic);
+    assert!(extractor.resampler.is_none());
+    assert!(extractor.transcriber.is_none());
+    assert!(extractor.resampler_16k.is_none());
+    assert!(extractor.bytedance_crnn.is_none());
+
+    // Switch back to ByteDance CRNN
+    extractor.change_crnn_type(crate::audio_processing::CrnnType::ByteDance);
+    extractor.change_mode(PitchDetectorMode::Crnn);
+    assert_eq!(extractor.crnn_type, crate::audio_processing::CrnnType::ByteDance);
+    assert!(extractor.resampler_16k.is_some());
+    assert!(extractor.bytedance_crnn.is_some());
+}
+
+#[test]
+fn test_bytedance_static_model_path_configuration() {
+    use crate::audio_processing::dsp::{
+        set_bytedance_model_paths, BYTEDANCE_ONNX_MODEL_PATH, BYTEDANCE_TFLITE_MODEL_PATH,
+    };
+
+    set_bytedance_model_paths(
+        "models/bytedance_crnn.tflite".to_string(),
+        "models/bytedance_crnn.onnx".to_string(),
+    );
+
+    assert_eq!(
+        BYTEDANCE_TFLITE_MODEL_PATH.get().map(|s| s.as_str()),
+        Some("models/bytedance_crnn.tflite")
+    );
+    assert_eq!(
+        BYTEDANCE_ONNX_MODEL_PATH.get().map(|s| s.as_str()),
+        Some("models/bytedance_crnn.onnx")
+    );
+}
+
+

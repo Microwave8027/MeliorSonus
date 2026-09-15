@@ -1,7 +1,11 @@
-use crate::audio_processing::PsychoacousticLoudnessMeter;
 use crate::audio_processing::instruments::instrument::InstrumentAcousticProfile;
 use crate::audio_processing::instruments::notes::*;
-use crate::audio_processing::neural::crnn::{BasicPitchOutput, MIDI_OFFSET, NUM_MIDI_NOTES, NUM_PITCH_BINS};
+use crate::audio_processing::neural::bytedance_crnn::ByteDanceCrnnOutput;
+use crate::audio_processing::neural::crnn::{
+    BasicPitchOutput, MIDI_OFFSET, NUM_MIDI_NOTES, NUM_PITCH_BINS,
+};
+use crate::audio_processing::processing::functions::spectral::psychoacoustic_loudness::PitchLoudness;
+use crate::audio_processing::{PsychoacousticLoudnessMeter, classify_articulation};
 use crate::constants::FRAME_SIZE;
 use arrayvec::ArrayVec;
 
@@ -13,6 +17,19 @@ pub const MONO_EXIT_CLARITY: f32 = 0.55;
 pub enum SegmentedNoteEvent {
     Start(StartNote),
     End(EndNote),
+}
+
+fn dynamic_from_velocity(vel: u8) -> DynamicLevel {
+    match vel {
+        0..=31 => DynamicLevel::Pianississimo,
+        32..=47 => DynamicLevel::Pianissimo,
+        48..=63 => DynamicLevel::Piano,
+        64..=79 => DynamicLevel::MezzoPiano,
+        80..=95 => DynamicLevel::MezzoForte,
+        96..=111 => DynamicLevel::Forte,
+        112..=120 => DynamicLevel::Fortissimo,
+        _ => DynamicLevel::Fortississimo,
+    }
 }
 
 pub struct StreamingNoteSegmenter {
@@ -38,6 +55,14 @@ pub struct StreamingNoteSegmenter {
     pitch_hysteresis_semitones: f32,
     /// Candidate pitch for legato transition requiring multi-frame confirmation
     pending_legato_candidate: Option<(Pitch, Octave, i8, u8)>, // (pitch, octave, offset, consecutive_frames)
+
+    // ByteDance CRNN Dedicated State Tracking (0 heap allocation)
+    bytedance_velocity: [u8; NUM_MIDI_NOTES],
+    bytedance_restrike_lockout: [u8; NUM_MIDI_NOTES],
+    bytedance_pedal_alive: [bool; NUM_MIDI_NOTES],
+    bytedance_prev_onset: [f32; NUM_MIDI_NOTES],
+    bytedance_pedal_active: bool,
+    bytedance_pedal_hangover: u8,
 }
 
 impl StreamingNoteSegmenter {
@@ -60,6 +85,12 @@ impl StreamingNoteSegmenter {
             pitch_hysteresis_semitones: 0.70,
             pending_legato_candidate: None,
             psychoacoustic_loudness,
+            bytedance_velocity: [0; NUM_MIDI_NOTES],
+            bytedance_restrike_lockout: [0; NUM_MIDI_NOTES],
+            bytedance_pedal_alive: [false; NUM_MIDI_NOTES],
+            bytedance_prev_onset: [0.0; NUM_MIDI_NOTES],
+            bytedance_pedal_active: false,
+            bytedance_pedal_hangover: 0,
         }
     }
 
@@ -96,6 +127,10 @@ impl StreamingNoteSegmenter {
         &self.active_notes
     }
 
+    pub fn bytedance_pedal_alive(&self) -> &[bool; NUM_MIDI_NOTES] {
+        &self.bytedance_pedal_alive
+    }
+
     /// Converts a frequency in Hz into a global MIDI note number (0..127).
     pub fn freq_to_midi_index(freq: f32) -> Option<usize> {
         if freq <= 0.0 || freq.is_nan() || freq.is_infinite() {
@@ -123,6 +158,7 @@ impl StreamingNoteSegmenter {
     pub fn transfer_mono_to_poly(&mut self) {
         self.mono_hangover_frames = 0;
         self.pending_legato_candidate = None;
+        self.bytedance_pedal_alive = [false; NUM_MIDI_NOTES];
         if let Some(mono) = self.active_mono_note.take() {
             if let Some(idx) = Self::note_to_midi_index(mono.pitch, mono.octave) {
                 self.active_notes[idx] = Some(mono);
@@ -160,6 +196,10 @@ impl StreamingNoteSegmenter {
                 }
             }
         }
+
+        self.bytedance_pedal_alive = [false; NUM_MIDI_NOTES];
+        self.bytedance_pedal_active = false;
+        self.bytedance_velocity = [0; NUM_MIDI_NOTES];
 
         finalized
     }
@@ -428,8 +468,15 @@ impl StreamingNoteSegmenter {
         let mut valid_frequencies = ArrayVec::<f32, NUM_PITCH_BINS>::new();
         for (idx, &frame_prob) in output.frames.iter().enumerate() {
             let midi_idx = idx + MIDI_OFFSET;
-            let is_onset = output.onsets.get(idx).map_or(false, |&p| p >= self.onset_threshold);
-            let is_active = self.active_notes.get(midi_idx).and_then(|n| n.as_ref()).is_some();
+            let is_onset = output
+                .onsets
+                .get(idx)
+                .map_or(false, |&p| p >= self.onset_threshold);
+            let is_active = self
+                .active_notes
+                .get(midi_idx)
+                .and_then(|n| n.as_ref())
+                .is_some();
             if frame_prob >= self.frame_threshold || is_onset || is_active {
                 let _ = valid_frequencies.try_push(midi_to_freq(midi_idx as u8));
             }
@@ -451,7 +498,11 @@ impl StreamingNoteSegmenter {
             let (pitch, octave) = Self::midi_index_to_note(midi_idx);
             let tonality_offset = 0i8;
 
-            match (self.active_notes[midi_idx].as_mut(), is_frame_active, is_onset) {
+            match (
+                self.active_notes[midi_idx].as_mut(),
+                is_frame_active,
+                is_onset,
+            ) {
                 // New Note Onset
                 (None, true, _) => {
                     let note = RecordNote::new_with_features(
@@ -521,6 +572,312 @@ impl StreamingNoteSegmenter {
 
         events
     }
+    /// bytedance helpers
+    ///
+    /// Updates the global sustain pedal state using dual Schmitt-trigger hysteresis
+    /// and a 2-frame (40ms) release hangover filter.
+    /// Returns `true` if the pedal was just released on this frame.
+    fn update_bytedance_pedal_state(&mut self, output: &ByteDanceCrnnOutput) -> bool {
+        let pedal_on = output.pedal_frame >= 0.50 || output.pedal_onset >= 0.40;
+        let pedal_off = output.pedal_frame < 0.35 || output.pedal_offset >= 0.35;
+
+        let prev_pedal = self.bytedance_pedal_active;
+        if pedal_on {
+            self.bytedance_pedal_active = true;
+            self.bytedance_pedal_hangover = 0;
+        } else if self.bytedance_pedal_active && pedal_off {
+            self.bytedance_pedal_active = false;
+            self.bytedance_pedal_hangover = 0;
+        }
+        let pedal_just_released = prev_pedal && !self.bytedance_pedal_active;
+        if !self.bytedance_pedal_active {
+            self.bytedance_pedal_alive = [false; NUM_MIDI_NOTES];
+        }
+        pedal_just_released
+    }
+
+    /// Dispatches optional Zwicker Bark sones and phons computation for active frequencies
+    /// when a non-empty audio frame slice is passed.
+    #[allow(dead_code)]
+    fn calculate_bytedance_loudness(
+        &mut self,
+        output: &ByteDanceCrnnOutput,
+        frame: &[f32],
+    ) -> [Option<PitchLoudness>; NUM_MIDI_NOTES] {
+        if frame.is_empty() {
+            return [None; NUM_MIDI_NOTES];
+        }
+
+        let mut valid_frequencies = ArrayVec::<f32, NUM_PITCH_BINS>::new();
+        for (idx, &frame_prob) in output.frames.iter().enumerate() {
+            let midi_idx = idx + MIDI_OFFSET;
+            let is_onset = output
+                .onsets
+                .get(idx)
+                .map_or(false, |&p| p >= self.onset_threshold);
+            let is_active = self
+                .active_notes
+                .get(midi_idx)
+                .and_then(|n| n.as_ref())
+                .is_some();
+            if frame_prob >= self.frame_threshold || is_onset || is_active {
+                let _ = valid_frequencies.try_push(midi_to_freq(midi_idx as u8));
+            }
+        }
+        self.psychoacoustic_loudness
+            .calculate_frequency_loudness(frame, &valid_frequencies[..])
+    }
+
+    /// Initializes active note tracking for a key, overrides neural velocity & dynamic,
+    /// sets initial rise duration, stores the note in `active_notes`, and returns `StartNote`.
+    fn start_bytedance_note(
+        &mut self,
+        midi_idx: usize,
+        pitch: Pitch,
+        octave: Octave,
+        velocity: u8,
+        timestamp_ms: u128,
+        energy_dbfs: f32,
+        crest_factor: f32,
+        sub_thump_dbfs: f32,
+        spectral_centroid: f32,
+        sones: Option<f32>,
+        phons: Option<f32>,
+    ) -> StartNote {
+        const RESTRIKE_LOCKOUT_FRAMES: u8 = 4; // 80ms lockout @ 20ms hop
+
+        self.bytedance_velocity[midi_idx] = velocity;
+        self.bytedance_restrike_lockout[midi_idx] = RESTRIKE_LOCKOUT_FRAMES;
+        self.bytedance_pedal_alive[midi_idx] = false;
+
+        let mut note = RecordNote::new_with_features(
+            pitch,
+            octave,
+            0, // tonality_offset
+            energy_dbfs,
+            timestamp_ms,
+            crest_factor,
+            sub_thump_dbfs,
+            spectral_centroid,
+            None,
+            sones,
+            phons,
+        );
+        note.rise_duration = Some(0.020);
+
+        let mut start_event = note.to_start_note();
+        start_event.velocity = Some(velocity);
+        start_event.dynamic = dynamic_from_velocity(velocity);
+
+        self.active_notes[midi_idx] = Some(note);
+        start_event
+    }
+
+    /// Extracts an active note, applies neural velocity, dynamic, recomputed articulation,
+    /// and optional damping override, then returns `Some(EndNote)` if above minimum duration.
+    fn finalize_bytedance_note(
+        &mut self,
+        midi_idx: usize,
+        timestamp_ms: u128,
+        damping_override: Option<DampingProfile>,
+        profile: &InstrumentAcousticProfile,
+    ) -> Option<EndNote> {
+        let old_note = self.active_notes[midi_idx].take()?;
+        let vel = self.bytedance_velocity[midi_idx];
+        self.bytedance_velocity[midi_idx] = 0;
+
+        let initial_crest_factor = old_note.initial_crest_factor;
+        let effective_rise = old_note.rise_duration.unwrap_or(0.020).max(0.005);
+        let attack_slope = (old_note.peak_dbfs - old_note.onset_dbfs).abs() / effective_rise;
+
+        let mut end_note = old_note.into_end_note_with_profile(timestamp_ms, false, profile);
+        if vel > 0 {
+            end_note.velocity = Some(vel);
+            end_note.dynamic = dynamic_from_velocity(vel);
+            end_note.articulation = classify_articulation(
+                end_note.note_duration,
+                false,
+                attack_slope,
+                effective_rise,
+                initial_crest_factor,
+                vel,
+                profile,
+            );
+        }
+        if let Some(d) = damping_override {
+            end_note.damping = d;
+        }
+
+        if end_note.note_duration >= self.min_note_duration_sec {
+            Some(end_note)
+        } else {
+            None
+        }
+    }
+
+    /// Accumulates sustain frame energy, spectral centroid, and sones on an active note.
+    fn accumulate_bytedance_sustain(
+        note: &mut RecordNote,
+        timestamp_ms: u128,
+        energy_dbfs: f32,
+        spectral_centroid: f32,
+        sones: Option<f32>,
+    ) {
+        note.last_timestamp = timestamp_ms;
+        note.add_peak_dbfs(energy_dbfs);
+        note.accumulate_frame(0, spectral_centroid, sones);
+        if note.rise_duration.is_none() {
+            note.rise_duration = Some(0.020);
+        }
+    }
+
+    /// Processes a single ByteDance CRNN output frame with 7 heads (onsets, offsets, frames, velocity, pedals).
+    pub fn process_bytedance_crnn_frame(
+        &mut self,
+        output: &ByteDanceCrnnOutput,
+        timestamp_ms: u128,
+        crest_factor: f32,
+        sub_thump_dbfs: f32,
+        spectral_centroid: f32,
+        profile: &InstrumentAcousticProfile,
+        _frame: &[f32], // Used only when calcululating loudness with phons and sones, uneeded here.
+    ) -> ArrayVec<SegmentedNoteEvent, MAX_POLYPHONIC_NOTES> {
+        let mut events = ArrayVec::new();
+
+        const OFFSET_THRESHOLD: f32 = 0.35;
+        const LEGATO_FRAME_THRESHOLD: f32 = 0.65;
+
+        // Update Global Pedal State (Dual Schmitt-Trigger + 40ms Hangover)
+        let _pedal_just_released = self.update_bytedance_pedal_state(output);
+
+        // Optional Psychoacoustic Loudness (Zwicker Bark Sones/Phons)
+        // let loudness_values = self.calculate_bytedance_loudness(output, _frame);
+
+        // Per-Key State Machine (88 Keys: MIDI 21 A0 to 108 C8)
+        for (idx, &onset_prob) in output.onsets.iter().enumerate() {
+            let midi_idx = idx + MIDI_OFFSET;
+            if self.bytedance_restrike_lockout[midi_idx] > 0 {
+                self.bytedance_restrike_lockout[midi_idx] -= 1;
+            }
+
+            let frame_prob = output.frames.get(idx).copied().unwrap_or(0.0);
+            let offset_prob = output.offsets.get(idx).copied().unwrap_or(0.0);
+            let neural_velocity = output.velocity.get(idx).copied().unwrap_or(64.0);
+
+            // Rising-edge peak detection
+            let prev_onset = self.bytedance_prev_onset[midi_idx];
+            let is_onset_spike = onset_prob >= self.onset_threshold && onset_prob >= prev_onset;
+            self.bytedance_prev_onset[midi_idx] = onset_prob;
+
+            let is_frame_active = frame_prob >= self.frame_threshold;
+            let is_offset_spike = offset_prob >= OFFSET_THRESHOLD;
+
+            let safe_vel = if neural_velocity.is_nan() {
+                64.0
+            } else {
+                neural_velocity
+            };
+            let vel_midi = safe_vel.clamp(1.0, 127.0).round() as u8;
+
+            // let loudness_opt = loudness_values.get(midi_idx).and_then(|&opt| opt);
+            // let sones = loudness_opt.map(|l| l.sones);
+            // let phons = loudness_opt.map(|l| l.phons);
+
+            let (pitch, octave) = Self::midi_index_to_note(midi_idx);
+
+            match self.active_notes[midi_idx].as_mut() {
+                // CASE 1: IDLE KEY -> NOTE START
+                None => {
+                    let is_pedal_alive = self.bytedance_pedal_alive[midi_idx];
+                    let is_debounced_onset =
+                        is_onset_spike && self.bytedance_restrike_lockout[midi_idx] == 0;
+                    let should_start = if is_pedal_alive {
+                        // When marked in pedal_alive, ignore all activations unless a new physical onset is detected
+                        is_debounced_onset
+                    } else {
+                        is_debounced_onset
+                            || (frame_prob >= LEGATO_FRAME_THRESHOLD
+                                && !is_offset_spike
+                                && output.energy_dbfs > -50.0)
+                    };
+
+                    if should_start {
+                        self.bytedance_pedal_alive[midi_idx] = false;
+                        let start_event = self.start_bytedance_note(
+                            midi_idx,
+                            pitch,
+                            octave,
+                            vel_midi,
+                            timestamp_ms,
+                            output.energy_dbfs,
+                            crest_factor,
+                            sub_thump_dbfs,
+                            spectral_centroid,
+                            None, // sones
+                            None, // phons
+                        );
+                        let _ = events.try_push(SegmentedNoteEvent::Start(start_event));
+                    }
+                }
+
+                // CASE 2: ACTIVE KEY -> SUSTAIN / RESTRIKE / RELEASE
+                Some(note) => {
+                    Self::accumulate_bytedance_sustain(
+                        note,
+                        timestamp_ms,
+                        output.energy_dbfs,
+                        spectral_centroid,
+                        None, // sones
+                    );
+
+                    // CONFIRMED RESTRIKE (debounced >= 80ms)
+                    if is_onset_spike && self.bytedance_restrike_lockout[midi_idx] == 0 {
+                        if let Some(end_note) =
+                            self.finalize_bytedance_note(midi_idx, timestamp_ms, None, profile)
+                        {
+                            let _ = events.try_push(SegmentedNoteEvent::End(end_note));
+                        }
+                        self.bytedance_pedal_alive[midi_idx] = false;
+                        let start_event = self.start_bytedance_note(
+                            midi_idx,
+                            pitch,
+                            octave,
+                            vel_midi,
+                            timestamp_ms,
+                            output.energy_dbfs,
+                            crest_factor,
+                            sub_thump_dbfs,
+                            spectral_centroid,
+                            None, // sones
+                            None, // phons
+                        );
+                        let _ = events.try_push(SegmentedNoteEvent::Start(start_event));
+                    }
+                    // KEY RELEASE: Musician lets go of key (offset spike or frame dropped)
+                    else if is_offset_spike || !is_frame_active {
+                        let damping = if self.bytedance_pedal_active {
+                            self.bytedance_pedal_alive[midi_idx] = true;
+                            DampingProfile::PedalSustained
+                        } else {
+                            self.bytedance_pedal_alive[midi_idx] = false;
+                            DampingProfile::DryDamped
+                        };
+
+                        if let Some(end_note) = self.finalize_bytedance_note(
+                            midi_idx,
+                            timestamp_ms,
+                            Some(damping),
+                            profile,
+                        ) {
+                            let _ = events.try_push(SegmentedNoteEvent::End(end_note));
+                        }
+                    }
+                }
+            }
+        }
+
+        events
+    }
 
     /// Finalizes all currently active notes (both monophonic and polyphonic) upon stream stop or silence.
     pub fn finalize_all(
@@ -537,14 +894,16 @@ impl StreamingNoteSegmenter {
             }
         }
 
-        for opt_note in self.active_notes.iter_mut() {
-            if let Some(note) = opt_note.take() {
-                let end_note = note.into_end_note_with_profile(timestamp_ms, false, profile);
-                if end_note.note_duration >= self.min_note_duration_sec {
-                    let _ = finalized.try_push(end_note);
-                }
+        for midi_idx in 0..NUM_MIDI_NOTES {
+            if let Some(end_note) =
+                self.finalize_bytedance_note(midi_idx, timestamp_ms, None, profile)
+            {
+                let _ = finalized.try_push(end_note);
             }
         }
+        self.bytedance_pedal_alive = [false; NUM_MIDI_NOTES];
+        self.bytedance_pedal_active = false;
+        self.bytedance_velocity = [0; NUM_MIDI_NOTES];
 
         finalized
     }
@@ -952,5 +1311,325 @@ mod tests {
         );
         assert_eq!(valid.len(), 1);
         assert!(matches!(valid[0], SegmentedNoteEvent::Start(_)));
+    }
+
+    #[test]
+    fn test_bytedance_crnn_segmentation_with_offsets_and_pedal() {
+        let mut segmenter = StreamingNoteSegmenter::new(0.5, 0.4, 44100);
+        let profile = Instrument::Piano.acoustic_profile();
+        let frame = [0.0f32; FRAME_SIZE];
+
+        // 1. Note Onset for A4 (MIDI 69 -> bin 48)
+        let mut out = ByteDanceCrnnOutput::default();
+        out.onsets[48] = 0.85;
+        out.frames[48] = 0.90;
+        out.velocity[48] = 95.0; // Fortissimo
+        out.pedal_frame = 0.80; // Sustain pedal pressed down
+
+        let events = segmenter
+            .process_bytedance_crnn_frame(&out, 1000, 8.0, -55.0, 1200.0, &profile, &frame);
+        assert_eq!(events.len(), 1);
+        if let SegmentedNoteEvent::Start(s) = &events[0] {
+            assert_eq!(s.pitch, Pitch::A);
+            assert_eq!(s.octave, Octave::O4);
+            assert_eq!(s.velocity, Some(95));
+            assert_eq!(s.dynamic, DynamicLevel::MezzoForte);
+        } else {
+            panic!("Expected StartNote event");
+        }
+
+        // 2. Key released at ts=1100ms while pedal held -> Musician lets go!
+        // EndNote must be emitted immediately when the musician lets go (100ms duration),
+        // with DampingProfile::PedalSustained, and marked in pedal_alive array.
+        let mut out_pedal = ByteDanceCrnnOutput::default();
+        out_pedal.frames[48] = 0.30; // frame dropped below threshold (musician released key)
+        out_pedal.pedal_frame = 0.85; // pedal still held
+
+        let events_pedal = segmenter
+            .process_bytedance_crnn_frame(&out_pedal, 1100, 4.0, -65.0, 800.0, &profile, &frame);
+        assert_eq!(
+            events_pedal.len(),
+            1,
+            "EndNote must be emitted immediately when the musician lets go"
+        );
+        if let SegmentedNoteEvent::End(e) = &events_pedal[0] {
+            assert_eq!(e.pitch, Pitch::A);
+            assert_eq!(e.octave, Octave::O4);
+            assert_eq!(e.velocity, Some(95));
+            assert_eq!(e.dynamic, DynamicLevel::MezzoForte);
+            assert_eq!(e.damping, DampingProfile::PedalSustained);
+            assert!((e.note_duration - 0.100).abs() < 0.001);
+        } else {
+            panic!("Expected EndNote event on key release");
+        }
+        assert!(
+            segmenter.bytedance_pedal_alive()[69],
+            "A4 must be marked in pedal_alive array"
+        );
+
+        // 3. String continues ringing under pedal: high frame activation without onset is IGNORED!
+        let mut out_ringing = ByteDanceCrnnOutput::default();
+        out_ringing.frames[48] = 0.85; // String still ringing loudly
+        out_ringing.pedal_frame = 0.85; // Pedal still down
+        out_ringing.energy_dbfs = -30.0;
+
+        let events_ringing = segmenter.process_bytedance_crnn_frame(
+            &out_ringing,
+            1150,
+            6.0,
+            -30.0,
+            1200.0,
+            &profile,
+            &frame,
+        );
+        assert!(
+            events_ringing.is_empty(),
+            "Ringing strings in pedal_alive array must be ignored without new onset"
+        );
+
+        // 4. Pedal is released at ts=1250ms -> pedal_alive is cleared
+        let mut out_pedal_off = ByteDanceCrnnOutput::default();
+        out_pedal_off.pedal_frame = 0.10; // Pedal released
+        let events_off = segmenter.process_bytedance_crnn_frame(
+            &out_pedal_off,
+            1250,
+            2.0,
+            -70.0,
+            500.0,
+            &profile,
+            &frame,
+        );
+        assert!(events_off.is_empty());
+        assert!(
+            !segmenter.bytedance_pedal_alive()[69],
+            "pedal_alive must be cleared on pedal release"
+        );
+    }
+
+    #[test]
+    fn test_bytedance_crnn_pedal_alive_restrike() {
+        let mut segmenter = StreamingNoteSegmenter::new(0.5, 0.4, 44100);
+        let profile = Instrument::Piano.acoustic_profile();
+        let frame = [0.0f32; FRAME_SIZE];
+
+        // 1. Play A4 with pedal held down at ts=1000ms
+        let mut out1 = ByteDanceCrnnOutput::default();
+        out1.onsets[48] = 0.85;
+        out1.frames[48] = 0.90;
+        out1.velocity[48] = 75.0;
+        out1.pedal_frame = 0.85;
+
+        let ev1 = segmenter
+            .process_bytedance_crnn_frame(&out1, 1000, 8.0, -50.0, 1000.0, &profile, &frame);
+        assert_eq!(ev1.len(), 1);
+        assert!(matches!(ev1[0], SegmentedNoteEvent::Start(_)));
+
+        // Advance frames through sustain (1020, 1040, 1060, 1080) to expire the 80ms restrike lockout
+        for t in [1020, 1040, 1060, 1080] {
+            let mut out_sustain = ByteDanceCrnnOutput::default();
+            out_sustain.frames[48] = 0.85;
+            out_sustain.pedal_frame = 0.85;
+            let _ = segmenter.process_bytedance_crnn_frame(
+                &out_sustain,
+                t,
+                6.0,
+                -50.0,
+                900.0,
+                &profile,
+                &frame,
+            );
+        }
+
+        // 2. Musician lets go of key at ts=1100ms -> EndNote emitted, key enters pedal_alive
+        let mut out_release = ByteDanceCrnnOutput::default();
+        out_release.frames[48] = 0.20;
+        out_release.pedal_frame = 0.85;
+
+        let ev2 = segmenter.process_bytedance_crnn_frame(
+            &out_release,
+            1100,
+            4.0,
+            -60.0,
+            800.0,
+            &profile,
+            &frame,
+        );
+        assert_eq!(ev2.len(), 1);
+        assert!(matches!(ev2[0], SegmentedNoteEvent::End(_)));
+        assert!(segmenter.bytedance_pedal_alive()[69]);
+
+        // 3. String ringing under pedal is ignored
+        let mut out_ring = ByteDanceCrnnOutput::default();
+        out_ring.frames[48] = 0.80;
+        out_ring.pedal_frame = 0.85;
+        let ev3 = segmenter.process_bytedance_crnn_frame(
+            &out_ring,
+            1120,
+            5.0,
+            -52.0,
+            800.0,
+            &profile,
+            &frame,
+        );
+        assert!(ev3.is_empty());
+
+        // 4. Musician restrikes A4 at ts=1140ms (new onset spike detected!)
+        let mut out_restrike = ByteDanceCrnnOutput::default();
+        out_restrike.onsets[48] = 0.92;
+        out_restrike.frames[48] = 0.95;
+        out_restrike.velocity[48] = 110.0;
+        out_restrike.pedal_frame = 0.85;
+
+        let ev4 = segmenter.process_bytedance_crnn_frame(
+            &out_restrike,
+            1140,
+            9.0,
+            -45.0,
+            1200.0,
+            &profile,
+            &frame,
+        );
+        assert_eq!(ev4.len(), 1, "New onset must start note even if in pedal_alive");
+        if let SegmentedNoteEvent::Start(s) = &ev4[0] {
+            assert_eq!(s.pitch, Pitch::A);
+            assert_eq!(s.octave, Octave::O4);
+            assert_eq!(s.velocity, Some(110));
+            assert_eq!(s.dynamic, DynamicLevel::Forte);
+        } else {
+            panic!("Expected StartNote event on restrike");
+        }
+        assert!(
+            !segmenter.bytedance_pedal_alive()[69],
+            "pedal_alive must be cleared once new onset is struck"
+        );
+    }
+
+    #[test]
+    fn test_bytedance_crnn_restrike_debouncing() {
+        let mut segmenter = StreamingNoteSegmenter::new(0.5, 0.4, 44100);
+        let profile = Instrument::Piano.acoustic_profile();
+        let frame = [0.0f32; FRAME_SIZE];
+
+        // 1. Initial strike for C4 (MIDI 60 -> bin 39)
+        let mut out = ByteDanceCrnnOutput::default();
+        out.onsets[39] = 0.80;
+        out.frames[39] = 0.85;
+        out.velocity[39] = 80.0; // MezzoForte
+
+        let events = segmenter
+            .process_bytedance_crnn_frame(&out, 1000, 6.0, -50.0, 1000.0, &profile, &frame);
+        assert_eq!(events.len(), 1);
+        if let SegmentedNoteEvent::Start(s) = &events[0] {
+            assert_eq!(s.velocity, Some(80));
+        }
+
+        // 2. Immediate next frame (20ms later): onset remains high (smooth regression curve)
+        // Restrike lockout should debounce and prevent premature note termination
+        let mut out2 = ByteDanceCrnnOutput::default();
+        out2.onsets[39] = 0.82;
+        out2.frames[39] = 0.85;
+        out2.velocity[39] = 82.0;
+
+        let events2 = segmenter
+            .process_bytedance_crnn_frame(&out2, 1020, 6.0, -50.0, 1000.0, &profile, &frame);
+        assert!(
+            events2.is_empty(),
+            "Consecutive onset frames within lockout must be debounced"
+        );
+
+        // Advance 3 more frames (60ms) to expire the 4-frame lockout
+        for t in [1040, 1060, 1080] {
+            let mut out_sustain = ByteDanceCrnnOutput::default();
+            out_sustain.frames[39] = 0.70;
+            let _ = segmenter.process_bytedance_crnn_frame(
+                &out_sustain,
+                t,
+                5.0,
+                -52.0,
+                950.0,
+                &profile,
+                &frame,
+            );
+        }
+
+        // 3. Genuine physical restrike after lockout expires (at 100ms) with higher velocity
+        let mut out_restrike = ByteDanceCrnnOutput::default();
+        out_restrike.onsets[39] = 0.90;
+        out_restrike.frames[39] = 0.88;
+        out_restrike.velocity[39] = 105.0; // Forte
+
+        let events_restrike = segmenter.process_bytedance_crnn_frame(
+            &out_restrike,
+            1100,
+            8.0,
+            -45.0,
+            1200.0,
+            &profile,
+            &frame,
+        );
+        assert_eq!(
+            events_restrike.len(),
+            2,
+            "Expected EndNote for previous strike and StartNote for new strike"
+        );
+        if let SegmentedNoteEvent::End(e) = &events_restrike[0] {
+            assert_eq!(
+                e.velocity, Some(80),
+                "Previous note must retain its original strike velocity"
+            );
+        }
+        if let SegmentedNoteEvent::Start(s) = &events_restrike[1] {
+            assert_eq!(
+                s.velocity, Some(105),
+                "New note must receive the restrike velocity"
+            );
+            assert_eq!(s.dynamic, DynamicLevel::Forte);
+        }
+    }
+
+    #[test]
+    fn test_bytedance_crnn_ghost_note_rejection() {
+        let mut segmenter = StreamingNoteSegmenter::new(0.5, 0.4, 44100);
+        let profile = Instrument::Piano.acoustic_profile();
+        let frame = [0.0f32; FRAME_SIZE];
+
+        // Moderate frame probability (e.g. 0.45 from harmonic resonance), but onset is 0.0
+        let mut out = ByteDanceCrnnOutput::default();
+        out.frames[39] = 0.45; // > frame_threshold (0.40) but < LEGATO_FRAME_THRESHOLD (0.65)
+        out.onsets[39] = 0.05; // No onset spike
+
+        let events =
+            segmenter.process_bytedance_crnn_frame(&out, 1000, 4.0, -60.0, 800.0, &profile, &frame);
+        assert!(
+            events.is_empty(),
+            "Overtone harmonic resonance without onset or high legato frame must be rejected"
+        );
+    }
+
+    #[test]
+    fn test_bytedance_crnn_finalize_all_preserves_velocity() {
+        let mut segmenter = StreamingNoteSegmenter::new(0.5, 0.4, 44100);
+        let profile = Instrument::Piano.acoustic_profile();
+        let frame = [0.0f32; FRAME_SIZE];
+
+        // Start note G4 (MIDI 67 -> bin 46) with velocity 115 (Fortissimo)
+        let mut out = ByteDanceCrnnOutput::default();
+        out.onsets[46] = 0.85;
+        out.frames[46] = 0.90;
+        out.velocity[46] = 115.0;
+
+        let _ = segmenter
+            .process_bytedance_crnn_frame(&out, 1000, 9.0, -40.0, 1500.0, &profile, &frame);
+
+        // Stream suddenly ends at 1200ms -> finalize_all
+        let finalized = segmenter.finalize_all(1200, &profile);
+        assert_eq!(finalized.len(), 1);
+        assert_eq!(finalized[0].pitch, Pitch::G);
+        assert_eq!(finalized[0].octave, Octave::O4);
+        assert_eq!(
+            finalized[0].velocity, Some(115),
+            "Finalize all must preserve the neural velocity"
+        );
+        assert_eq!(finalized[0].dynamic, DynamicLevel::Fortissimo);
     }
 }

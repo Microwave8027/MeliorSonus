@@ -295,6 +295,7 @@ pub fn extract_fermata(note: &Note) -> bool {
 }
 
 pub fn extract_ornament(note: &Note) -> Option<OrnamentKind> {
+    let mut found_other = false;
     for notation in &note.content.notations {
         for item in &notation.content.notations {
             if let NotationContentTypes::Ornaments(orn) = item {
@@ -306,13 +307,19 @@ pub fn extract_ornament(note: &Note) -> Option<OrnamentKind> {
                         musicxml::elements::OrnamentType::Mordent(_) => return Some(OrnamentKind::Mordent),
                         musicxml::elements::OrnamentType::InvertedMordent(_) => return Some(OrnamentKind::InvertedMordent),
                         musicxml::elements::OrnamentType::Tremolo(_) => return Some(OrnamentKind::Tremolo),
-                        _ => return Some(OrnamentKind::Other),
+                        _ => {
+                            found_other = true;
+                        }
                     }
                 }
             }
         }
     }
-    None
+    if found_other {
+        Some(OrnamentKind::Other)
+    } else {
+        None
+    }
 }
 
 pub fn midi_to_pitch(midi: u8) -> Pitch {

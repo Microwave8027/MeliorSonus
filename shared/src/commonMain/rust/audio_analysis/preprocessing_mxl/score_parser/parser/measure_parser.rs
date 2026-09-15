@@ -96,6 +96,7 @@ pub fn resolve_target_part_indices(instruments: &[String], target_instrument: &s
 }
 
 /// Legacy helper for single-part resolution.
+#[deprecated]
 pub fn resolve_target_part_index(instruments: &[String], target_instrument: &str) -> Option<u32> {
     resolve_target_part_indices(instruments, target_instrument)
         .into_iter()

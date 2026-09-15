@@ -19,5 +19,9 @@ captures
 node_modules/
 **/target/
 .vscode/
+**/.venv/
+**/.venv-wsl/
+**/models/
+**/assets/
 tools/build_litert/_*
 shared/src/commonMain/rust/assets/mxl_assets/*

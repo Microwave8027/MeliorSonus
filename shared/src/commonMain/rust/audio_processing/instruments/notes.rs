@@ -112,7 +112,7 @@ pub struct StartNote {
     pub crest_factor: f32,
     pub sub_thump_dbfs: f32,
     pub mpm_clarity: Option<f32>,
-    pub velocity: u8,
+    pub velocity: Option<u8>,
     pub dynamic: DynamicLevel,
 }
 
@@ -149,7 +149,7 @@ pub enum NoteArticulation {
 /// * `is_flat: bool` — Flag indicating whether the sustained pitch average was below the instrument's flat intonation threshold. Range: `true` / `false`.
 /// * `spectral_centroid: f32` — Average spectral center-of-mass in Hertz (spectral brightness / timbral richness). Range: `0.0` to `Nyquist (SampleRate / 2)` Hz.
 /// * `mpm_clarity: Option<f32>` — McLeod Pitch Method normalized square difference (NSDF) periodicity confidence. Range: `Some(0.0..=1.0)` or `None`.
-/// * `velocity: u8` — Calibrated MIDI strike velocity. Range: `1` to `127`.
+/// * `velocity: Option<u8>` — Calibrated MIDI strike velocity. Range: `Some(1..127)` or `None`.
 /// * `dynamic: DynamicLevel` — Standard musical dynamic marking (ppp to fff).
 /// * `damping: DampingProfile` — Damping state upon release (DryDamped, PedalSustained, HalfPedal).
 #[derive(uniffi::Record, Clone, Debug, PartialEq)]
@@ -172,7 +172,7 @@ pub struct EndNote {
     pub is_flat: bool,
     pub spectral_centroid: f32,
     pub mpm_clarity: Option<f32>,
-    pub velocity: u8,
+    pub velocity: Option<u8>,
     pub dynamic: DynamicLevel,
     pub damping: DampingProfile,
 }
@@ -457,7 +457,7 @@ impl RecordNote {
             crest_factor: self.initial_crest_factor,
             sub_thump_dbfs: self.initial_sub_thump_dbfs,
             mpm_clarity: self.mpm_clarity,
-            velocity,
+            velocity: Some(velocity),
             dynamic,
         }
     }
@@ -590,7 +590,7 @@ impl RecordNote {
             is_flat,
             spectral_centroid: avg_centroid,
             mpm_clarity: self.mpm_clarity,
-            velocity,
+            velocity: Some(velocity),
             dynamic,
             damping,
         }

@@ -19,6 +19,21 @@ use std::sync::{Arc, Mutex, OnceLock};
 pub static ONNX_MODEL_PATH: OnceLock<String> = OnceLock::new();
 pub static TFLITE_MODEL_PATH: OnceLock<String> = OnceLock::new();
 
+pub static BYTEDANCE_ONNX_MODEL_PATH: OnceLock<String> = OnceLock::new();
+pub static BYTEDANCE_TFLITE_MODEL_PATH: OnceLock<String> = OnceLock::new();
+
+/// Sets the global static model paths for Spotify Basic Pitch.
+pub fn set_basic_pitch_model_paths(tflite_runtime_model: String, onnx_runtime_model: String) {
+    let _ = TFLITE_MODEL_PATH.set(tflite_runtime_model);
+    let _ = ONNX_MODEL_PATH.set(onnx_runtime_model);
+}
+
+/// Sets the global static model paths for ByteDance CRNN ("Byte Dancer").
+pub fn set_bytedance_model_paths(tflite_runtime_model: String, onnx_runtime_model: String) {
+    let _ = BYTEDANCE_TFLITE_MODEL_PATH.set(tflite_runtime_model);
+    let _ = BYTEDANCE_ONNX_MODEL_PATH.set(onnx_runtime_model);
+}
+
 pub struct CallBackParameters<'a> {
     pub buffer: &'a [f32; FRAME_SIZE],
     pub cfg: &'a StreamConfig,
@@ -85,6 +100,50 @@ impl Dsp {
             audio_engine,
             global_settings,
         }
+    }
+
+    pub fn new_with_models(
+        instrument: Instrument,
+        silence_threshold: f32,
+        error_callback: Arc<dyn ErrorCallback>,
+        pitch_detector_mode: PitchDetectorMode,
+        basic_pitch_tflite: String,
+        basic_pitch_onnx: String,
+        bytedance_tflite: String,
+        bytedance_onnx: String,
+        note_rb_prod: Producer<Notes>,
+        global_settings: Arc<Mutex<GlobalSettings>>,
+    ) -> Self {
+        let _ = TFLITE_MODEL_PATH.set(basic_pitch_tflite);
+        let _ = ONNX_MODEL_PATH.set(basic_pitch_onnx);
+        let _ = BYTEDANCE_TFLITE_MODEL_PATH.set(bytedance_tflite);
+        let _ = BYTEDANCE_ONNX_MODEL_PATH.set(bytedance_onnx);
+        let audio_engine = AudioEngine::new(
+            instrument,
+            Arc::clone(&error_callback),
+            note_rb_prod,
+            silence_threshold,
+            pitch_detector_mode,
+            Arc::clone(&global_settings),
+        );
+
+        Self {
+            instrument,
+            silence_threshold,
+            error_callback,
+            audio_engine,
+            global_settings,
+        }
+    }
+
+    pub fn with_bytedance_models(
+        self,
+        bytedance_tflite: String,
+        bytedance_onnx: String,
+    ) -> Self {
+        let _ = BYTEDANCE_TFLITE_MODEL_PATH.set(bytedance_tflite);
+        let _ = BYTEDANCE_ONNX_MODEL_PATH.set(bytedance_onnx);
+        self
     }
 
     pub fn error_callback(&self) -> &Arc<dyn ErrorCallback> {

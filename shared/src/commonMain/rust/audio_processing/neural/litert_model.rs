@@ -17,7 +17,6 @@
 //! 2. **GPU Fallback**: If NPU is unavailable or fails, falls back to Mobile GPU (Metal / OpenGL ES).
 //! 3. **CPU SIMD Fallback**: If GPU is unavailable or fails, falls back to CPU SIMD execution (XNNPACK).
 
-use crate::audio_processing::neural::crnn::{BasicPitchOutput, NeuralTranscriber};
 use std::path::Path;
 
 #[allow(
@@ -552,12 +551,11 @@ mod platform_impl {
 
 pub use platform_impl::*;
 
-pub struct LiteRtBasicPitchModel {
-    sample_rate: u32,
+pub struct LiteRtEngine {
     interpreter: Option<SafeLiteRtInterpreter>,
 }
 
-impl LiteRtBasicPitchModel {
+impl LiteRtEngine {
     pub fn from_file<P: AsRef<Path>>(
         model_path: P,
         delegate: HardwareDelegate,
@@ -569,7 +567,6 @@ impl LiteRtBasicPitchModel {
 
         let interpreter = SafeLiteRtInterpreter::create(model, Some(&options))?;
         Ok(Self {
-            sample_rate: 22050,
             interpreter: Some(interpreter),
         })
     }
@@ -585,69 +582,66 @@ impl LiteRtBasicPitchModel {
 
         let interpreter = SafeLiteRtInterpreter::create(model, Some(&options))?;
         Ok(Self {
-            sample_rate: 22050,
             interpreter: Some(interpreter),
         })
     }
 
     pub fn new_stub() -> Self {
         Self {
-            sample_rate: 22050,
             interpreter: None,
         }
     }
-}
 
-impl NeuralTranscriber for LiteRtBasicPitchModel {
-    fn transcribe_hop(&mut self, audio_hop_22k: &[f32], loudness: f32) -> BasicPitchOutput {
-        let mut out = BasicPitchOutput::default();
-        out.energy_dbfs = loudness;
+    pub fn is_stub(&self) -> bool {
+        self.interpreter.is_none()
+    }
 
+    pub fn input_tensor_byte_size(&self, input_index: usize) -> usize {
+        self.interpreter
+            .as_ref()
+            .map(|i| i.input_tensor_byte_size(input_index as i32))
+            .unwrap_or(0)
+    }
+
+    pub fn set_input_data<T: Copy>(&mut self, input_index: usize, data: &[T]) -> Result<(), LiteRtError> {
         if let Some(interpreter) = &mut self.interpreter {
-            let expected_bytes = interpreter.input_tensor_byte_size(0);
-            let expected_samples = if expected_bytes > 0 {
-                expected_bytes / std::mem::size_of::<f32>()
-            } else {
-                audio_hop_22k.len()
-            };
-
-            let status = if expected_samples == audio_hop_22k.len() {
-                interpreter.set_input_data(0, audio_hop_22k)
-            } else if expected_samples > 0 && expected_samples != audio_hop_22k.len() {
-                // If model has a fixed input tensor dimension and resampled output has slight variance,
-                // safely pad or slice into a static stack buffer to match exact tensor dimensions without heap allocation
-                let mut padded = [0.0f32; 1024];
-                if expected_samples <= padded.len() {
-                    let copy_len = audio_hop_22k.len().min(expected_samples);
-                    padded[..copy_len].copy_from_slice(&audio_hop_22k[..copy_len]);
-                    interpreter.set_input_data(0, &padded[..expected_samples])
-                } else {
-                    interpreter.set_input_data(0, audio_hop_22k)
-                }
-            } else {
-                interpreter.set_input_data(0, audio_hop_22k)
-            };
-
-            if status.is_ok() && interpreter.invoke().is_ok() {
-                let _ = interpreter.get_output_data(0, &mut out.onsets);
-                let _ = interpreter.get_output_data(1, &mut out.frames);
-                let _ = interpreter.get_output_data(2, &mut out.contours);
-            }
+            interpreter.set_input_data(input_index as i32, data)
         } else {
-            out.onsets.fill(0.0);
-            out.frames.fill(0.0);
-            out.contours.fill(0.0);
+            Ok(())
         }
-
-        out
     }
 
-    fn sample_rate(&self) -> u32 {
-        self.sample_rate
+    pub fn invoke(&mut self) -> Result<(), LiteRtError> {
+        if let Some(interpreter) = &mut self.interpreter {
+            interpreter.invoke()
+        } else {
+            Ok(())
+        }
     }
 
-    fn reset(&mut self) {}
+    pub fn get_output_data<T: Copy>(&self, output_index: usize, out: &mut [T]) -> Result<(), LiteRtError> {
+        if let Some(interpreter) = &self.interpreter {
+            interpreter.get_output_data(output_index as i32, out)
+        } else {
+            Ok(())
+        }
+    }
+
+    pub fn get_output_scalar_f32(&self, output_index: usize) -> Result<f32, LiteRtError> {
+        let mut scalar = [0.0f32; 1];
+        self.get_output_data(output_index, &mut scalar)?;
+        Ok(scalar[0])
+    }
 }
+
+impl Default for LiteRtEngine {
+    fn default() -> Self {
+        Self::new_stub()
+    }
+}
+
+unsafe impl Send for LiteRtEngine {}
+unsafe impl Sync for LiteRtEngine {}
 
 #[cfg(test)]
 mod tests {
@@ -655,14 +649,15 @@ mod tests {
 
     #[test]
     fn test_litert_stub_creation() {
-        let mut model = LiteRtBasicPitchModel::new_stub();
-        assert_eq!(model.sample_rate(), 22050);
+        let mut engine = LiteRtEngine::new_stub();
+        assert!(engine.is_stub());
 
         let audio = [0.0f32; 512];
-        let output = model.transcribe_hop(audio.as_slice(), -20.0);
-        assert_eq!(output.energy_dbfs, -20.0);
-        assert_eq!(output.onsets[0], 0.0);
-        assert_eq!(output.frames[0], 0.0);
+        assert!(engine.set_input_data(0, &audio).is_ok());
+        assert!(engine.invoke().is_ok());
+        let mut out = [0.0f32; 88];
+        assert!(engine.get_output_data(0, &mut out).is_ok());
+        assert_eq!(engine.get_output_scalar_f32(0).unwrap(), 0.0);
     }
 
     #[test]

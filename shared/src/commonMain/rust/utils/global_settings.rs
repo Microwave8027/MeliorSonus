@@ -1,10 +1,11 @@
-use crate::audio_processing::{HardwareDelegate, HybridPitchDetectorMode};
+use crate::audio_processing::{CrnnType, HardwareDelegate, HybridPitchDetectorMode};
 
 /// When editing this, the audio engine MUST BE PAUSED
 pub struct GlobalSettings {
     pub device: HardwareDelegate,
     pub show_metrics: bool,
     pub note_recognition_mode: HybridPitchDetectorMode,
+    pub crnn_type: CrnnType,
 }
 
 impl Default for GlobalSettings {
@@ -13,6 +14,7 @@ impl Default for GlobalSettings {
             device: HardwareDelegate::Cpu,
             show_metrics: false,
             note_recognition_mode: HybridPitchDetectorMode::Mpm,
+            crnn_type: CrnnType::ByteDance,
         }
     }
 }
@@ -27,6 +29,7 @@ impl GlobalSettings {
             device,
             show_metrics,
             note_recognition_mode,
+            crnn_type: CrnnType::ByteDance,
         }
     }
 
@@ -44,5 +47,11 @@ impl GlobalSettings {
     /// When editing this, the audio engine MUST BE PAUSED
     pub fn change_note_recognition_mode(&mut self, note_recognition_mode: HybridPitchDetectorMode) {
         self.note_recognition_mode = note_recognition_mode;
+    }
+
+    #[inline]
+    /// When editing this, the audio engine MUST BE PAUSED
+    pub fn change_crnn_type(&mut self, crnn_type: CrnnType) {
+        self.crnn_type = crnn_type;
     }
 }

@@ -32,7 +32,7 @@ fn make_test_start_note(pitch: Pitch, octave: Octave, cents: i8) -> Notes {
         crest_factor: 12.0,
         sub_thump_dbfs: -60.0,
         mpm_clarity: Some(0.95),
-        velocity: 80,
+        velocity: Some(80),
         dynamic: DynamicLevel::MezzoForte,
     })
 }
@@ -57,7 +57,7 @@ fn make_test_end_note(pitch: Pitch, octave: Octave, cents: i8) -> Notes {
         is_flat: false,
         spectral_centroid: 800.0,
         mpm_clarity: Some(0.95),
-        velocity: 80,
+        velocity: Some(80),
         dynamic: DynamicLevel::MezzoForte,
         damping: crate::audio_processing::instruments::notes::DampingProfile::DryDamped,
     })

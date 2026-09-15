@@ -1,0 +1,10 @@
+# MeliorSonus ByteDance CRNN Export Dependencies
+torch>=2.4.1
+torchaudio>=2.4.1
+onnx>=1.15.0
+onnxruntime>=1.17.0
+numpy>=1.24.0,<2.0.0
+
+# Google AI Edge Torch / LiteRT compiler (Linux/WSL2/macOS)
+litert-torch>=0.8.0; sys_platform != "win32"
+tensorflow>=2.16.0; sys_platform != "win32"

@@ -58,7 +58,7 @@ fn test_hybrid_feature_extractor_audio_engine_direct_integration() {
     assert_eq!(event1.octave(), Octave::O4);
     if let Notes::Start(s) = event1 {
         assert_eq!(s.dynamic, DynamicLevel::Fortississimo);
-        assert!(s.velocity > 50);
+        assert!(s.velocity.expect("Velocity expected") > 50);
     } else {
         panic!("Expected Notes::Start");
     }
