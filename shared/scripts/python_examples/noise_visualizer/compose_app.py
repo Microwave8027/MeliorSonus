@@ -1187,7 +1187,7 @@ class EndNote:
     * `is_flat: bool` — Flag indicating whether the sustained pitch average was below the instrument's flat intonation threshold. Range: `true` / `false`.
     * `spectral_centroid: f32` — Average spectral center-of-mass in Hertz (spectral brightness / timbral richness). Range: `0.0` to `Nyquist (SampleRate / 2)` Hz.
     * `mpm_clarity: Option<f32>` — McLeod Pitch Method normalized square difference (NSDF) periodicity confidence. Range: `Some(0.0..=1.0)` or `None`.
-    * `velocity: u8` — Calibrated MIDI strike velocity. Range: `1` to `127`.
+    * `velocity: Option<u8>` — Calibrated MIDI strike velocity. Range: `Some(1..127)` or `None`.
     * `dynamic: DynamicLevel` — Standard musical dynamic marking (ppp to fff).
     * `damping: DampingProfile` — Damping state upon release (DryDamped, PedalSustained, HalfPedal).
     """
@@ -1210,10 +1210,10 @@ class EndNote:
     is_flat: "bool"
     spectral_centroid: "float"
     mpm_clarity: "typing.Optional[float]"
-    velocity: "int"
+    velocity: "typing.Optional[int]"
     dynamic: "DynamicLevel"
     damping: "DampingProfile"
-    def __init__(self, *, pitch: "Pitch", octave: "Octave", tonality_offset: "int", avg_cents_offset: "int", loudness_dbfs: "float", peak_sones: "typing.Optional[float]", peak_phons: "typing.Optional[float]", avg_sones: "typing.Optional[float]", avg_phons: "typing.Optional[float]", rise_duration: "float", attack_slope: "float", note_duration: "float", note_striked: "U128", articulation: "NoteArticulation", is_mashed: "bool", is_flat: "bool", spectral_centroid: "float", mpm_clarity: "typing.Optional[float]", velocity: "int", dynamic: "DynamicLevel", damping: "DampingProfile"):
+    def __init__(self, *, pitch: "Pitch", octave: "Octave", tonality_offset: "int", avg_cents_offset: "int", loudness_dbfs: "float", peak_sones: "typing.Optional[float]", peak_phons: "typing.Optional[float]", avg_sones: "typing.Optional[float]", avg_phons: "typing.Optional[float]", rise_duration: "float", attack_slope: "float", note_duration: "float", note_striked: "U128", articulation: "NoteArticulation", is_mashed: "bool", is_flat: "bool", spectral_centroid: "float", mpm_clarity: "typing.Optional[float]", velocity: "typing.Optional[int]", dynamic: "DynamicLevel", damping: "DampingProfile"):
         self.pitch = pitch
         self.octave = octave
         self.tonality_offset = tonality_offset
@@ -1306,7 +1306,7 @@ class _UniffiConverterTypeEndNote(_UniffiConverterRustBuffer):
             is_flat=_UniffiConverterBool.read(buf),
             spectral_centroid=_UniffiConverterFloat.read(buf),
             mpm_clarity=_UniffiConverterOptionalFloat.read(buf),
-            velocity=_UniffiConverterUInt8.read(buf),
+            velocity=_UniffiConverterOptionalUInt8.read(buf),
             dynamic=_UniffiConverterTypeDynamicLevel.read(buf),
             damping=_UniffiConverterTypeDampingProfile.read(buf),
         )
@@ -1331,7 +1331,7 @@ class _UniffiConverterTypeEndNote(_UniffiConverterRustBuffer):
         _UniffiConverterBool.check_lower(value.is_flat)
         _UniffiConverterFloat.check_lower(value.spectral_centroid)
         _UniffiConverterOptionalFloat.check_lower(value.mpm_clarity)
-        _UniffiConverterUInt8.check_lower(value.velocity)
+        _UniffiConverterOptionalUInt8.check_lower(value.velocity)
         _UniffiConverterTypeDynamicLevel.check_lower(value.dynamic)
         _UniffiConverterTypeDampingProfile.check_lower(value.damping)
 
@@ -1355,7 +1355,7 @@ class _UniffiConverterTypeEndNote(_UniffiConverterRustBuffer):
         _UniffiConverterBool.write(value.is_flat, buf)
         _UniffiConverterFloat.write(value.spectral_centroid, buf)
         _UniffiConverterOptionalFloat.write(value.mpm_clarity, buf)
-        _UniffiConverterUInt8.write(value.velocity, buf)
+        _UniffiConverterOptionalUInt8.write(value.velocity, buf)
         _UniffiConverterTypeDynamicLevel.write(value.dynamic, buf)
         _UniffiConverterTypeDampingProfile.write(value.damping, buf)
 
@@ -1391,9 +1391,9 @@ class StartNote:
     crest_factor: "float"
     sub_thump_dbfs: "float"
     mpm_clarity: "typing.Optional[float]"
-    velocity: "int"
+    velocity: "typing.Optional[int]"
     dynamic: "DynamicLevel"
-    def __init__(self, *, pitch: "Pitch", octave: "Octave", tonality_offset: "int", loudness_dbfs: "float", sones: "typing.Optional[float]", phons: "typing.Optional[float]", note_striked: "U128", crest_factor: "float", sub_thump_dbfs: "float", mpm_clarity: "typing.Optional[float]", velocity: "int", dynamic: "DynamicLevel"):
+    def __init__(self, *, pitch: "Pitch", octave: "Octave", tonality_offset: "int", loudness_dbfs: "float", sones: "typing.Optional[float]", phons: "typing.Optional[float]", note_striked: "U128", crest_factor: "float", sub_thump_dbfs: "float", mpm_clarity: "typing.Optional[float]", velocity: "typing.Optional[int]", dynamic: "DynamicLevel"):
         self.pitch = pitch
         self.octave = octave
         self.tonality_offset = tonality_offset
@@ -1451,7 +1451,7 @@ class _UniffiConverterTypeStartNote(_UniffiConverterRustBuffer):
             crest_factor=_UniffiConverterFloat.read(buf),
             sub_thump_dbfs=_UniffiConverterFloat.read(buf),
             mpm_clarity=_UniffiConverterOptionalFloat.read(buf),
-            velocity=_UniffiConverterUInt8.read(buf),
+            velocity=_UniffiConverterOptionalUInt8.read(buf),
             dynamic=_UniffiConverterTypeDynamicLevel.read(buf),
         )
 
@@ -1467,7 +1467,7 @@ class _UniffiConverterTypeStartNote(_UniffiConverterRustBuffer):
         _UniffiConverterFloat.check_lower(value.crest_factor)
         _UniffiConverterFloat.check_lower(value.sub_thump_dbfs)
         _UniffiConverterOptionalFloat.check_lower(value.mpm_clarity)
-        _UniffiConverterUInt8.check_lower(value.velocity)
+        _UniffiConverterOptionalUInt8.check_lower(value.velocity)
         _UniffiConverterTypeDynamicLevel.check_lower(value.dynamic)
 
     @staticmethod
@@ -1482,7 +1482,7 @@ class _UniffiConverterTypeStartNote(_UniffiConverterRustBuffer):
         _UniffiConverterFloat.write(value.crest_factor, buf)
         _UniffiConverterFloat.write(value.sub_thump_dbfs, buf)
         _UniffiConverterOptionalFloat.write(value.mpm_clarity, buf)
-        _UniffiConverterUInt8.write(value.velocity, buf)
+        _UniffiConverterOptionalUInt8.write(value.velocity, buf)
         _UniffiConverterTypeDynamicLevel.write(value.dynamic, buf)
 
 
@@ -2450,6 +2450,33 @@ class _UniffiTraitImplErrorCallback:
 
 # The _UniffiConverter which transforms the Callbacks in to Handles to pass to Rust.
 _UniffiConverterTypeErrorCallback = _UniffiCallbackInterfaceFfiConverter()
+
+
+
+class _UniffiConverterOptionalUInt8(_UniffiConverterRustBuffer):
+    @classmethod
+    def check_lower(cls, value):
+        if value is not None:
+            _UniffiConverterUInt8.check_lower(value)
+
+    @classmethod
+    def write(cls, value, buf):
+        if value is None:
+            buf.write_u8(0)
+            return
+
+        buf.write_u8(1)
+        _UniffiConverterUInt8.write(value, buf)
+
+    @classmethod
+    def read(cls, buf):
+        flag = buf.read_u8()
+        if flag == 0:
+            return None
+        elif flag == 1:
+            return _UniffiConverterUInt8.read(buf)
+        else:
+            raise InternalError("Unexpected flag byte for optional type")
 
 
 

@@ -25,3 +25,16 @@ node_modules/
 **/assets/
 tools/build_litert/_*
 shared/src/commonMain/rust/assets/mxl_assets/*
+
+# Native binaries and debug symbols
+*.dll
+*.pdb
+*.exe
+*.so
+*.dylib
+
+# Python bytecode
+__pycache__/
+*.py[cod]
+*$py.class
+
