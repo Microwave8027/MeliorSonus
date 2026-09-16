@@ -7,13 +7,13 @@
  * The feature extractor state is tied to the build stream
  */
 
+use crate::audio_processing::Notes;
 use crate::audio_processing::PitchDetectorMode;
 use crate::audio_processing::dsp::{CallBackParameters, DspCallBack};
 use crate::audio_processing::instruments::instrument::Instrument;
 use crate::audio_processing::processing::functions::filters::band_pass_filter::BandPassFilter;
 use crate::audio_processing::processing::functions::pitch::mpm::MPM;
 use crate::constants::*;
-use crate::audio_processing::Notes;
 use crate::utils::error_callback::ErrorCallback;
 use crate::utils::errors::{AudioEngineError, RustError};
 use crate::utils::global_settings::GlobalSettings;
@@ -22,9 +22,9 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use cpal::{SampleFormat, Stream, StreamConfig};
 use rtrb::{Consumer, Producer, RingBuffer};
 use std::error::Error;
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, TryRecvError};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -621,10 +621,10 @@ impl AudioEngine {
     }
 
     pub fn end(&mut self) {
-        if let Some(tx) = &self.signal_tx {
+        if let Some(tx) = &self.signal_tx
+            && let Some(handle) = self.supervisor_handle.take()
+        {
             let _ = tx.send(EngineSignal::Closed);
-        }
-        if let Some(handle) = self.supervisor_handle.take() {
             let _ = handle.join();
         }
     }

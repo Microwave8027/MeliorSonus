@@ -1,7 +1,10 @@
 uniffi::setup_scaffolding!();
 
+use compose_app::audio_processing::CrnnType;
 use compose_app::audio_processing::DEFAULT_SILENCE_THRESHOLD_DBFS;
+use compose_app::audio_processing::HardwareDelegate;
 use compose_app::audio_processing::HybridFeatureExtractor;
+use compose_app::audio_processing::HybridPitchDetectorMode;
 use compose_app::audio_processing::Instrument;
 use compose_app::audio_processing::{Notes, PitchDetectorMode, WavReader};
 use compose_app::utils::ErrorCallback;
@@ -47,23 +50,30 @@ impl AudioCapturer {
     pub fn new(path: String, err_cb: Box<dyn CapturerCallback>) -> Self {
         let (prod, cons) = rtrb::RingBuffer::new(400);
 
-        if compose_app::audio_processing::ONNX_MODEL_PATH
+        if compose_app::audio_processing::BYTEDANCE_ONNX_MODEL_PATH
             .get()
             .is_none()
         {
             let candidates = [
-                "src/commonMain/rust/assets/basic_pitch_models/nmp.onnx",
-                "shared/src/commonMain/rust/assets/basic_pitch_models/nmp.onnx",
-                "../src/commonMain/rust/assets/basic_pitch_models/nmp.onnx",
-                "../../src/commonMain/rust/assets/basic_pitch_models/nmp.onnx",
+                "src/commonMain/rust/assets/bytedance/bytedance_crnn_acoustic_fp32.onnx",
+                "shared/src/commonMain/rust/assets/bytedance/bytedance_crnn_acoustic_fp32.onnx",
+                "../src/commonMain/rust/assets/bytedance/bytedance_crnn_acoustic_fp32.onnx",
+                "../../src/commonMain/rust/assets/bytedance/bytedance_crnn_acoustic_fp32.onnx",
             ];
             for cand in candidates {
                 if Path::new(cand).exists() {
-                    let _ = compose_app::audio_processing::ONNX_MODEL_PATH.set(cand.to_string());
+                    let _ = compose_app::audio_processing::BYTEDANCE_ONNX_MODEL_PATH
+                        .set(cand.to_string());
                     break;
                 }
             }
         }
+        let settings = Arc::new(Mutex::new(GlobalSettings::new(
+            HardwareDelegate::Cpu,
+            false,
+            HybridPitchDetectorMode::Mpm,
+            CrnnType::ByteDance,
+        )));
 
         let path_buf = Path::new(&path);
         let hound = WavReader::new(
@@ -73,7 +83,7 @@ impl AudioCapturer {
             prod,
             DEFAULT_SILENCE_THRESHOLD_DBFS,
             PitchDetectorMode::Crnn,
-            Arc::new(Mutex::new(GlobalSettings::default())),
+            settings,
         );
         Self {
             rb_cons: Mutex::new(cons),

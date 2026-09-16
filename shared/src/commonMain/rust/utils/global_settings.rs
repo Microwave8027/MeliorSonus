@@ -14,7 +14,7 @@ impl Default for GlobalSettings {
             device: HardwareDelegate::Cpu,
             show_metrics: false,
             note_recognition_mode: HybridPitchDetectorMode::Mpm,
-            crnn_type: CrnnType::ByteDance,
+            crnn_type: CrnnType::BasicPitch,
         }
     }
 }
@@ -24,20 +24,23 @@ impl GlobalSettings {
         device: HardwareDelegate,
         show_metrics: bool,
         note_recognition_mode: HybridPitchDetectorMode,
+        crnn_type: CrnnType,
     ) -> Self {
         Self {
             device,
             show_metrics,
             note_recognition_mode,
-            crnn_type: CrnnType::ByteDance,
+            crnn_type,
         }
     }
 
+    #[inline]
     /// When editing this, the audio engine MUST BE PAUSED
     pub fn change_device(&mut self, device: HardwareDelegate) {
         self.device = device;
     }
 
+    #[inline]
     /// When editing this, the audio engine MUST BE PAUSED
     pub fn change_metrics_mode(&mut self, show_metrics: bool) {
         self.show_metrics = show_metrics;
