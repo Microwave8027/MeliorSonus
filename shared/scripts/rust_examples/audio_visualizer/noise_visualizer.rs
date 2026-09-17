@@ -59,6 +59,8 @@ impl AudioCapturer {
                 "shared/src/commonMain/rust/assets/bytedance/bytedance_crnn_acoustic_fp32.onnx",
                 "../src/commonMain/rust/assets/bytedance/bytedance_crnn_acoustic_fp32.onnx",
                 "../../src/commonMain/rust/assets/bytedance/bytedance_crnn_acoustic_fp32.onnx",
+                "../../../src/commonMain/rust/assets/bytedance/bytedance_crnn_acoustic_fp32.onnx",
+                "assets/bytedance_crnn_acoustic_fp32.onnx",
             ];
             for cand in candidates {
                 if Path::new(cand).exists() {

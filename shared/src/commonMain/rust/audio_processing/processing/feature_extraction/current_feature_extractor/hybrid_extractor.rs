@@ -601,11 +601,6 @@ impl DspCallBack for HybridFeatureExtractor {
         self.real_fft.compute_magnitude_spectrum(&filtered_frame);
         let spectral_centroid =
             compute_spectral_centroid(&self.real_fft.magnitude, cfg.sample_rate as f32);
-        let hfc_onset_ts = self.hfc_onset_detector.process_frame(
-            self.real_fft.magnitude.as_slice(),
-            dbfs,
-            timestamp,
-        );
 
         // Always update telemetry metrics per incoming frame
         if let Ok(process) = self.global_settings.lock() {
@@ -631,6 +626,11 @@ impl DspCallBack for HybridFeatureExtractor {
 
         match self.pitch_detector_mode {
             PitchDetectorMode::Basic => {
+                let hfc_onset_ts = self.hfc_onset_detector.process_frame(
+                    self.real_fft.magnitude.as_slice(),
+                    dbfs,
+                    timestamp,
+                );
                 self.process_basic_path(
                     &filtered_frame,
                     cfg,
@@ -688,6 +688,11 @@ impl DspCallBack for HybridFeatureExtractor {
                         );
                     }
                     (Some(HybridPitchDetectorMode::Crnn), HybridPitchDetectorMode::Mpm) => {
+                        let hfc_onset_ts = self.hfc_onset_detector.process_frame(
+                            self.real_fft.magnitude.as_slice(),
+                            dbfs,
+                            timestamp,
+                        );
                         // Switching from CRNN to monophonic: push last active note in CRNN that MPM detects into MPM and finalize everything else
                         let (ph, pc) = mpm.mpm(&filtered_frame, cfg, instrument);
                         let detected_note = if pc >= self.segmenter.frame_threshold() {
@@ -718,6 +723,11 @@ impl DspCallBack for HybridFeatureExtractor {
                         );
                     }
                     (_, HybridPitchDetectorMode::Mpm) => {
+                        let hfc_onset_ts = self.hfc_onset_detector.process_frame(
+                            self.real_fft.magnitude.as_slice(),
+                            dbfs,
+                            timestamp,
+                        );
                         self.process_basic_path(
                             &filtered_frame,
                             cfg,
