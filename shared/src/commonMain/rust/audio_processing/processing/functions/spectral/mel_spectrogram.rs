@@ -13,7 +13,7 @@ pub const CRNN_MEL_BINS: usize = 229;
 pub const CRNN_FFT_BINS: usize = CRNN_FFT_SIZE / 2 + 1; // 1025 bins
 pub const CRNN_F_MIN: f32 = 30.0;
 pub const CRNN_F_MAX: f32 = 8000.0;
-pub const CRNN_LOG_CLAMP_MIN: f32 = 1e-5;
+pub const CRNN_LOG_CLAMP_MIN: f32 = 1e-10;
 
 /// Pre-calculated sparse representation of a single triangular Mel filter.
 #[derive(Clone, Debug)]
@@ -109,7 +109,7 @@ impl SlaneyMelFrontend {
             } else {
                 mel_energy
             };
-            out_log_mel[m] = clamped.ln();
+            out_log_mel[m] = 10.0 * clamped.log10();
         }
     }
 
@@ -251,10 +251,10 @@ mod tests {
 
         frontend.compute_log_mel_frame(&silent_pcm, &mut log_mel);
 
-        let expected_min = CRNN_LOG_CLAMP_MIN.ln(); // ln(1e-5) ≈ -11.5129
+        let expected_min = 10.0 * CRNN_LOG_CLAMP_MIN.log10(); // 10 * log10(1e-10) = -100.0 dB
         for &val in &log_mel {
             assert!(
-                (val - expected_min).abs() < 1e-5,
+                (val - expected_min).abs() < 1e-4,
                 "Expected clamped silence {}, got {}",
                 expected_min,
                 val

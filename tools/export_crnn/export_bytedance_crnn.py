@@ -227,7 +227,7 @@ class ExportableMelSpectrogram(nn.Module):
         self,
         sample_rate: int = 16000,
         n_fft: int = 2048,
-        hop_length: int = 320,
+        hop_length: int = 160,
         n_mels: int = 229,
         f_min: float = 30.0,
         f_max: float = 8000.0,
@@ -307,7 +307,7 @@ class ExportableMelSpectrogram(nn.Module):
         power_spec = real.pow(2) + imag.pow(2)  # [batch, 1025, time]
         power_spec = power_spec.transpose(1, 2) # [batch, time, 1025]
         mel = torch.matmul(power_spec, self.mel_fb) # [batch, time, 229]
-        log_mel = torch.log(torch.clamp(mel, min=1e-5))
+        log_mel = 10.0 * torch.log10(torch.clamp(mel, min=1e-10))
         return log_mel.unsqueeze(1)  # [batch, 1, time, 229]
 
 
@@ -321,7 +321,7 @@ class MeliorSonusCRNNEndToEnd(nn.Module):
         self.mel = ExportableMelSpectrogram(
             sample_rate=16000,
             n_fft=2048,
-            hop_length=320,
+            hop_length=160,
             n_mels=229,
             f_min=30.0,
             f_max=8000.0,
