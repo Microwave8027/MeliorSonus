@@ -1,0 +1,15 @@
+[project]
+name = "python-examples"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+authors = [
+    { email = "wuyicong26@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "matplotlib>=3.11.2",
+]
+
+[tool.uv]
+package = false
