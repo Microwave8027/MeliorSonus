@@ -1,3 +1,15 @@
+# MeliorSonus
+
+> **Status: incomplete.** This project is a work in progress and is not yet usable end to end.
+
+## The Idea
+
+MeliorSonus is an app that helps users play music better. It renders an SVG of the sheet music from a MusicXML file and overlays practice advice directly on the score.
+
+The audio pipeline is written in Rust. It analyzes what the user plays and compares it against references, such as the actual MusicXML, to measure how accurate the performance is. That feedback is what drives the advice shown on the rendered score.
+
+## Project Structure
+
 This is a Kotlin Multiplatform project targeting Android, iOS, Web, Desktop (JVM).
 
 * [/iosApp](./iosApp/iosApp) contains an iOS application. Even if you’re sharing your UI with Compose Multiplatform,
