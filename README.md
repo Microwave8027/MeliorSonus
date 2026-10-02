@@ -8,6 +8,24 @@ MeliorSonus is an app that helps users play music better. It renders an SVG of t
 
 The audio pipeline is written in Rust. It analyzes what the user plays and compares it against references, such as the actual MusicXML, to measure how accurate the performance is. That feedback is what drives the advice shown on the rendered score.
 
+It should also support comparing a performance against a YouTube video, showing how far off the user is from the reference.
+
+## What's Implemented
+
+- Real-time audio capture and WAV reading (`cpal`, `hound`), with resampling and filtering.
+- DSP feature extraction: pitch detection (MPM/NSDF), onset detection, tempo tracking, spectral features, RMS/psychoacoustic loudness, and articulation/damping classification.
+- Neural polyphonic note transcription (CRNN-based, run through `tract`/LiteRT) with a note segmenter.
+- MusicXML/MXL score parsing and preprocessing, plus early score matching.
+- A Kotlin Multiplatform app skeleton (Compose Multiplatform) with navigation and placeholder screens.
+
+## Still To Do
+
+- **UI:** a real user interface, including the SVG score rendering with advice overlays.
+- **Comparison engine backend:** a good engine for comparing performances against the MusicXML (and other references) and scoring them.
+- **LLM integration:** turning comparison results into practice advice.
+- **Better CRNN:** a more accurate model for audio note detection.
+- **YouTube comparison:** comparing against a YouTube video and measuring how far off the performance is.
+
 ## Project Structure
 
 This is a Kotlin Multiplatform project targeting Android, iOS, Web, Desktop (JVM).
